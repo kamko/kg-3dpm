@@ -1,0 +1,113 @@
+@import "tailwindcss";
+
+:root {
+  --background: oklch(0.982 0.004 240);
+  --foreground: oklch(0.246 0.02 248);
+  --muted-foreground: oklch(0.492 0.016 248);
+  --panel: oklch(0.996 0.003 240 / 0.88);
+  --panel-strong: oklch(0.988 0.004 240);
+  --line: oklch(0.905 0.008 248);
+  --line-strong: oklch(0.845 0.012 248);
+  --accent: oklch(0.57 0.095 247);
+  --accent-soft: oklch(0.962 0.018 247);
+  --success: oklch(0.62 0.108 158);
+  --success-soft: oklch(0.965 0.028 158);
+  --warning-soft: oklch(0.973 0.026 88);
+  --danger: oklch(0.6 0.14 22);
+  --danger-soft: oklch(0.966 0.022 22);
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-panel: var(--panel);
+  --color-panel-strong: var(--panel-strong);
+  --color-border: var(--line);
+  --color-border-strong: var(--line-strong);
+  --color-accent: var(--accent);
+  --color-accent-soft: var(--accent-soft);
+  --color-success: var(--success);
+  --color-success-soft: var(--success-soft);
+  --color-warning-soft: var(--warning-soft);
+  --color-danger: var(--danger);
+  --color-danger-soft: var(--danger-soft);
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+}
+
+@layer base {
+  * {
+    border-color: var(--line);
+  }
+
+  html {
+    background:
+      radial-gradient(circle at top left, color-mix(in oklch, var(--accent) 10%, transparent), transparent 32%),
+      linear-gradient(180deg, oklch(0.994 0.004 240), var(--background));
+  }
+
+  body {
+    min-height: 100vh;
+    background: transparent;
+  }
+
+  input,
+  select,
+  textarea,
+  button {
+    font: inherit;
+  }
+}
+
+@layer components {
+  .surface {
+    @apply rounded-[28px] border border-border/80 bg-panel/90 shadow-[0_24px_60px_-42px_rgba(15,23,42,0.42)] backdrop-blur;
+  }
+
+  .surface-muted {
+    @apply rounded-[24px] border border-border/70 bg-white/72;
+  }
+
+  .eyebrow {
+    @apply text-[0.7rem] font-semibold uppercase tracking-[0.24em] text-muted-foreground;
+  }
+
+  .field {
+    @apply h-12 w-full rounded-2xl border border-border bg-white px-4 text-sm text-foreground outline-none transition placeholder:text-muted-foreground/75 focus:border-accent/40 focus:ring-4 focus:ring-accent/10;
+  }
+
+  .field-area {
+    @apply min-h-[112px] w-full rounded-2xl border border-border bg-white px-4 py-3 text-sm text-foreground outline-none transition placeholder:text-muted-foreground/75 focus:border-accent/40 focus:ring-4 focus:ring-accent/10;
+  }
+
+  .data-table {
+    @apply min-w-full border-separate border-spacing-0 text-left text-sm;
+  }
+
+  .data-table th {
+    @apply border-b border-border bg-panel-strong/90 px-4 py-3 text-[0.72rem] font-semibold uppercase tracking-[0.18em] text-muted-foreground;
+  }
+
+  .data-table td {
+    @apply border-b border-border/70 px-4 py-3 align-top;
+  }
+
+  .table-input {
+    @apply h-10 w-full rounded-xl border border-transparent bg-transparent px-2 text-sm text-foreground outline-none transition focus:border-accent/30 focus:bg-white focus:ring-4 focus:ring-accent/8;
+  }
+
+  .table-select {
+    @apply h-10 w-full rounded-xl border border-transparent bg-transparent px-2 text-sm text-foreground outline-none transition focus:border-accent/30 focus:bg-white focus:ring-4 focus:ring-accent/8;
+  }
+
+  .table-textarea {
+    @apply min-h-[72px] w-full rounded-xl border border-transparent bg-transparent px-2 py-2 text-sm text-foreground outline-none transition placeholder:text-muted-foreground/70 focus:border-accent/30 focus:bg-white focus:ring-4 focus:ring-accent/8;
+  }
+}
+
+@layer utilities {
+  .text-balance {
+    text-wrap: balance;
+  }
+}
