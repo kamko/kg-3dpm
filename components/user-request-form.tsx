@@ -243,10 +243,10 @@ export function UserRequestForm({
               Estimates currently come from STL or 3MF geometry, or from exact slicer values if you already have them.
             </p>
           </div>
-          <div className="grid grid-cols-2 gap-2 rounded-full border border-border bg-background p-1">
+          <div className="grid grid-cols-2 gap-1.5 rounded-[22px] border border-border bg-background p-1.5">
             <button
               className={cn(
-                "rounded-full px-4 py-2 text-sm font-medium transition",
+                "min-h-[52px] rounded-[16px] px-4 py-3 text-sm font-medium leading-5 transition",
                 inputMode === "stl"
                   ? "bg-foreground text-white"
                   : "text-muted-foreground hover:text-foreground",
@@ -254,11 +254,11 @@ export function UserRequestForm({
               type="button"
               onClick={() => setInputMode("stl")}
             >
-              Use model file
+              Model file
             </button>
             <button
               className={cn(
-                "rounded-full px-4 py-2 text-sm font-medium transition",
+                "min-h-[52px] rounded-[16px] px-4 py-3 text-sm font-medium leading-5 transition",
                 inputMode === "manual"
                   ? "bg-foreground text-white"
                   : "text-muted-foreground hover:text-foreground",
