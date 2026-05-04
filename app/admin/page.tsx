@@ -14,11 +14,12 @@ export default function AdminPage() {
           <p className="eyebrow">Admin</p>
           <div className="space-y-2">
             <h1 className="text-3xl font-semibold tracking-[-0.03em] text-foreground sm:text-[2.3rem]">
-              Pricing and task control in one screen.
+              Pricing, slicer state, and task control in one screen.
             </h1>
             <p className="max-w-2xl text-sm leading-7 text-muted-foreground sm:text-base">
-              Update filament pricing inline, tune machine cost, and move print
-              jobs from estimate to done without leaving the table.
+              Update filament pricing inline, tune machine cost, retry failed
+              slicer jobs, and move print jobs from estimate to done without
+              leaving the table.
             </p>
           </div>
         </div>

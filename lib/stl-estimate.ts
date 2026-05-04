@@ -1,12 +1,6 @@
-import JSZip from "jszip";
+import { extractTrianglesFrom3mfBuffer, type Triangle, type Vector3 } from "./model-geometry";
 import type { ComplexityOptionId, SizeOptionId } from "./quick-estimate";
 import { formatDuration } from "./utils";
-
-type Vector3 = {
-  x: number;
-  y: number;
-  z: number;
-};
 
 type GeometryStats = {
   min: Vector3;
@@ -66,22 +60,8 @@ export async function analyze3mfBuffer(
   buffer: ArrayBuffer,
   materialName: string,
 ): Promise<StlAnalysis> {
-  const zip = await JSZip.loadAsync(buffer);
-  const modelEntries = Object.values(zip.files).filter(
-    (entry) => !entry.dir && /(^|\/).+\.model$/i.test(entry.name),
-  );
-
-  if (modelEntries.length === 0) {
-    throw new Error("The 3MF file did not contain a core .model payload.");
-  }
-
-  let combined = createEmptyGeometry();
-
-  for (const entry of modelEntries) {
-    const xml = await entry.async("string");
-    const geometry = parse3mfModel(xml);
-    combined = mergeGeometry(combined, geometry);
-  }
+  const triangles = await extractTrianglesFrom3mfBuffer(buffer);
+  const combined = geometryFromTriangles(triangles);
 
   return finalizeAnalysis(combined, materialName, "3MF");
 }
@@ -205,174 +185,24 @@ function parseAsciiStl(buffer: ArrayBuffer): GeometryStats {
   };
 }
 
-function parse3mfModel(xml: string): GeometryStats {
-  const objectMatches = [...xml.matchAll(/<object\b[\s\S]*?<\/object>/g)];
-  const geometries = new Map<string, GeometryStats>();
-
-  for (const objectMatch of objectMatches) {
-    const objectXml = objectMatch[0];
-    const idMatch = objectXml.match(/\bid="([^"]+)"/);
-
-    if (!idMatch || !objectXml.includes("<mesh")) {
-      continue;
-    }
-
-    const geometry = parse3mfMesh(objectXml);
-    if (geometry.triangleCount > 0) {
-      geometries.set(idMatch[1], geometry);
-    }
-  }
-
-  const buildItems = [...xml.matchAll(/<item\b([^>]*)\/>/g)];
-
-  if (buildItems.length === 0) {
-    return [...geometries.values()].reduce(mergeGeometry, createEmptyGeometry());
-  }
-
-  let combined = createEmptyGeometry();
-
-  for (const buildItem of buildItems) {
-    const attrs = buildItem[1];
-    const objectId = attrs.match(/\bobjectid="([^"]+)"/)?.[1];
-    const geometry = objectId ? geometries.get(objectId) : null;
-
-    if (!geometry) {
-      continue;
-    }
-
-    const transform = parse3mfTransform(attrs.match(/\btransform="([^"]+)"/)?.[1]);
-    combined = mergeGeometry(combined, applyTransform(geometry, transform));
-  }
-
-  return combined.triangleCount > 0
-    ? combined
-    : [...geometries.values()].reduce(mergeGeometry, createEmptyGeometry());
-}
-
-function parse3mfMesh(objectXml: string): GeometryStats {
-  const verticesSection = objectXml.match(/<vertices>([\s\S]*?)<\/vertices>/)?.[1] ?? "";
-  const trianglesSection = objectXml.match(/<triangles>([\s\S]*?)<\/triangles>/)?.[1] ?? "";
-  const vertexMatches = [...verticesSection.matchAll(/<vertex\b([^>]*)\/>/g)];
-  const triangleMatches = [...trianglesSection.matchAll(/<triangle\b([^>]*)\/>/g)];
-  const vertices = vertexMatches.map((match) => parse3mfVertex(match[1]));
+function geometryFromTriangles(triangles: Triangle[]): GeometryStats {
   const min = makeInfinityVector(1);
   const max = makeInfinityVector(-1);
   let volumeMm3 = 0;
 
-  for (const vertex of vertices) {
-    includeVertex(vertex, min, max);
-  }
-
-  for (const triangle of triangleMatches) {
-    const aIndex = Number(triangle[1].match(/\bv1="([^"]+)"/)?.[1]);
-    const bIndex = Number(triangle[1].match(/\bv2="([^"]+)"/)?.[1]);
-    const cIndex = Number(triangle[1].match(/\bv3="([^"]+)"/)?.[1]);
-    const a = vertices[aIndex];
-    const b = vertices[bIndex];
-    const c = vertices[cIndex];
-
-    if (!a || !b || !c) {
-      continue;
-    }
-
-    volumeMm3 += signedTetrahedronVolume(a, b, c);
+  for (const triangle of triangles) {
+    includeVertex(triangle.a, min, max);
+    includeVertex(triangle.b, min, max);
+    includeVertex(triangle.c, min, max);
+    volumeMm3 += signedTetrahedronVolume(triangle.a, triangle.b, triangle.c);
   }
 
   return {
     min,
     max,
-    triangleCount: triangleMatches.length,
+    triangleCount: triangles.length,
     volumeMm3: Math.abs(volumeMm3),
   };
-}
-
-function parse3mfVertex(attributes: string): Vector3 {
-  return {
-    x: Number(attributes.match(/\bx="([^"]+)"/)?.[1] ?? 0),
-    y: Number(attributes.match(/\by="([^"]+)"/)?.[1] ?? 0),
-    z: Number(attributes.match(/\bz="([^"]+)"/)?.[1] ?? 0),
-  };
-}
-
-function parse3mfTransform(value?: string) {
-  if (!value) {
-    return null;
-  }
-
-  const parts = value
-    .trim()
-    .split(/\s+/)
-    .map(Number)
-    .filter((entry) => Number.isFinite(entry));
-
-  return parts.length === 12 ? parts : null;
-}
-
-function applyTransform(
-  geometry: GeometryStats,
-  transform: number[] | null,
-): GeometryStats {
-  if (!transform) {
-    return geometry;
-  }
-
-  const corners = getBoundingBoxCorners(geometry.min, geometry.max).map((corner) =>
-    transformVertex(corner, transform),
-  );
-  const min = makeInfinityVector(1);
-  const max = makeInfinityVector(-1);
-
-  for (const corner of corners) {
-    includeVertex(corner, min, max);
-  }
-
-  return {
-    min,
-    max,
-    triangleCount: geometry.triangleCount,
-    volumeMm3: Math.abs(determinant3x3(transform)) * geometry.volumeMm3,
-  };
-}
-
-function transformVertex(vertex: Vector3, transform: number[]) {
-  return {
-    x:
-      transform[0] * vertex.x +
-      transform[3] * vertex.y +
-      transform[6] * vertex.z +
-      transform[9],
-    y:
-      transform[1] * vertex.x +
-      transform[4] * vertex.y +
-      transform[7] * vertex.z +
-      transform[10],
-    z:
-      transform[2] * vertex.x +
-      transform[5] * vertex.y +
-      transform[8] * vertex.z +
-      transform[11],
-  };
-}
-
-function determinant3x3(matrix: number[]) {
-  return (
-    matrix[0] * (matrix[4] * matrix[8] - matrix[5] * matrix[7]) -
-    matrix[3] * (matrix[1] * matrix[8] - matrix[2] * matrix[7]) +
-    matrix[6] * (matrix[1] * matrix[5] - matrix[2] * matrix[4])
-  );
-}
-
-function getBoundingBoxCorners(min: Vector3, max: Vector3) {
-  return [
-    { x: min.x, y: min.y, z: min.z },
-    { x: min.x, y: min.y, z: max.z },
-    { x: min.x, y: max.y, z: min.z },
-    { x: min.x, y: max.y, z: max.z },
-    { x: max.x, y: min.y, z: min.z },
-    { x: max.x, y: min.y, z: max.z },
-    { x: max.x, y: max.y, z: min.z },
-    { x: max.x, y: max.y, z: max.z },
-  ];
 }
 
 function readBinaryVertex(view: DataView, offset: number): Vector3 {
@@ -449,40 +279,6 @@ function inferComplexity(triangleCount: number): ComplexityOptionId {
 function estimateVolumeFromBounds(maxDimensionMm: number) {
   const normalized = Math.max(12, maxDimensionMm);
   return (normalized * normalized * normalized * 0.08) / 1000;
-}
-
-function createEmptyGeometry(): GeometryStats {
-  return {
-    min: makeInfinityVector(1),
-    max: makeInfinityVector(-1),
-    triangleCount: 0,
-    volumeMm3: 0,
-  };
-}
-
-function mergeGeometry(left: GeometryStats, right: GeometryStats): GeometryStats {
-  if (left.triangleCount === 0) {
-    return right;
-  }
-
-  if (right.triangleCount === 0) {
-    return left;
-  }
-
-  return {
-    min: {
-      x: Math.min(left.min.x, right.min.x),
-      y: Math.min(left.min.y, right.min.y),
-      z: Math.min(left.min.z, right.min.z),
-    },
-    max: {
-      x: Math.max(left.max.x, right.max.x),
-      y: Math.max(left.max.y, right.max.y),
-      z: Math.max(left.max.z, right.max.z),
-    },
-    triangleCount: left.triangleCount + right.triangleCount,
-    volumeMm3: left.volumeMm3 + right.volumeMm3,
-  };
 }
 
 function makeInfinityVector(direction: 1 | -1): Vector3 {

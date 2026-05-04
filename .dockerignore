@@ -1,0 +1,6 @@
+.git
+.next
+node_modules
+npm-debug.log
+db/kg-3dpm.sqlite
+.run

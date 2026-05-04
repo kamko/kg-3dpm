@@ -1,17 +1,35 @@
 "use client";
 
-import { AlertCircle, Check, Filter, LoaderCircle, Settings2 } from "lucide-react";
+import {
+  AlertCircle,
+  Check,
+  Download,
+  Filter,
+  LoaderCircle,
+  Plus,
+  RotateCcw,
+  Settings2,
+} from "lucide-react";
 import { useState, useTransition } from "react";
 import { StatusBadge } from "@/components/status-badge";
 import { calculatePricing, parseDurationInput } from "@/lib/pricing";
+import { PRUSA_PRESET_OPTIONS } from "@/lib/prusa";
 import {
+  ESTIMATE_STATES,
   TASK_STATUSES,
+  type EstimateState,
   type Filament,
   type Settings,
   type Task,
   type TaskStatus,
 } from "@/lib/types";
-import { filamentLabel, formatCurrency, formatDateTime, formatDuration } from "@/lib/utils";
+import {
+  cn,
+  filamentLabel,
+  formatCurrency,
+  formatDateTime,
+  formatDuration,
+} from "@/lib/utils";
 
 type AdminDashboardProps = {
   initialFilaments: Filament[];
@@ -37,6 +55,7 @@ type FilamentDraft = {
   material: string;
   color: string;
   pricePerKg: string;
+  presetKey: string;
   available: boolean;
 };
 
@@ -49,18 +68,22 @@ export function AdminDashboard({
   const [settings, setSettings] = useState(initialSettings);
   const [tasks, setTasks] = useState(initialTasks);
   const [statusFilter, setStatusFilter] = useState<"all" | TaskStatus>("all");
+  const [estimateFilter, setEstimateFilter] = useState<"all" | EstimateState>("all");
   const [sortMode, setSortMode] = useState<SortMode>("newest");
   const [notice, setNotice] = useState<string | null>(null);
 
   const visibleTasks = [...tasks]
     .filter((task) => statusFilter === "all" || task.status === statusFilter)
+    .filter(
+      (task) => estimateFilter === "all" || task.estimateState === estimateFilter,
+    )
     .sort((left, right) => {
       if (sortMode === "name") {
         return left.nameOrLink.localeCompare(right.nameOrLink);
       }
 
       if (sortMode === "estimate") {
-        return right.estimatedPrice - left.estimatedPrice;
+        return (right.estimatedPrice ?? -1) - (left.estimatedPrice ?? -1);
       }
 
       if (sortMode === "status") {
@@ -72,9 +95,9 @@ export function AdminDashboard({
       );
     });
 
-  async function patchJson<T>(url: string, body: unknown): Promise<T> {
+  async function patchJson<T>(url: string, body: unknown, method = "PATCH"): Promise<T> {
     const response = await fetch(url, {
-      method: "PATCH",
+      method,
       headers: {
         "Content-Type": "application/json",
       },
@@ -109,6 +132,7 @@ export function AdminDashboard({
       material: body.material.trim(),
       color: body.color.trim(),
       pricePerKg,
+      presetKey: body.presetKey,
       available: body.available,
     };
 
@@ -117,7 +141,11 @@ export function AdminDashboard({
     );
     setTasks((current) =>
       current.map((task) =>
-        task.filamentId === id
+        task.filamentId === id &&
+        task.weightGrams !== null &&
+        task.durationMinutes !== null &&
+        task.estimateState === "ready" &&
+        !task.acceptedAt
           ? {
               ...task,
               filamentLabel: filamentLabel(optimisticFilament),
@@ -129,7 +157,12 @@ export function AdminDashboard({
                 machineHourPrice: settings.machineHourPrice,
               }).estimatedPrice,
             }
-          : task,
+          : task.filamentId === id
+            ? {
+                ...task,
+                filamentLabel: filamentLabel(optimisticFilament),
+              }
+            : task,
       ),
     );
 
@@ -139,6 +172,7 @@ export function AdminDashboard({
         material: optimisticFilament.material,
         color: optimisticFilament.color,
         pricePerKg: optimisticFilament.pricePerKg,
+        presetKey: optimisticFilament.presetKey,
         available: optimisticFilament.available,
       });
 
@@ -152,6 +186,46 @@ export function AdminDashboard({
       setTasks(previousTasks);
       throw error;
     }
+  }
+
+  async function createNewFilament(body: FilamentDraft): Promise<Filament> {
+    const pricePerKg = Number(body.pricePerKg);
+
+    if (!body.brand.trim() || !body.material.trim() || !body.color.trim()) {
+      throw new Error("Brand, material, and color are required.");
+    }
+
+    if (!Number.isFinite(pricePerKg) || pricePerKg <= 0) {
+      throw new Error("Price per kilogram must be greater than zero.");
+    }
+
+    const response = await fetch("/api/filaments", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        brand: body.brand.trim(),
+        material: body.material.trim(),
+        color: body.color.trim(),
+        pricePerKg,
+        presetKey: body.presetKey,
+        available: body.available,
+      }),
+    });
+
+    const data = (await response.json()) as {
+      filament?: Filament;
+      error?: string;
+    };
+
+    if (!response.ok || !data.filament) {
+      throw new Error(data.error ?? "Unable to create filament.");
+    }
+
+    setFilaments((current) => [data.filament!, ...current]);
+    setNotice(`Added filament ${filamentLabel(data.filament)}.`);
+    return data.filament;
   }
 
   async function saveMachineHourPrice(value: string): Promise<number> {
@@ -168,7 +242,13 @@ export function AdminDashboard({
     setTasks((current) =>
       current.map((task) => {
         const filament = filaments.find((item) => item.id === task.filamentId);
-        if (!filament) {
+        if (
+          !filament ||
+          task.weightGrams === null ||
+          task.durationMinutes === null ||
+          task.estimateState !== "ready" ||
+          task.acceptedAt
+        ) {
           return task;
         }
 
@@ -202,8 +282,6 @@ export function AdminDashboard({
 
   async function saveTask(id: number, draft: TaskDraft): Promise<Task> {
     const quantity = Number(draft.quantity);
-    const weightGrams = Number(draft.weightGrams);
-    const durationMinutes = parseDurationInput(draft.durationInput);
     const finalPrice =
       draft.finalPrice.trim() === "" ? null : Number(draft.finalPrice);
 
@@ -213,14 +291,6 @@ export function AdminDashboard({
 
     if (!Number.isFinite(quantity) || quantity <= 0) {
       throw new Error("Quantity must be greater than zero.");
-    }
-
-    if (!Number.isFinite(weightGrams) || weightGrams <= 0) {
-      throw new Error("Weight must be greater than zero.");
-    }
-
-    if (!durationMinutes || durationMinutes <= 0) {
-      throw new Error("Duration must be valid minutes or HH:MM.");
     }
 
     if (finalPrice !== null && (!Number.isFinite(finalPrice) || finalPrice < 0)) {
@@ -234,29 +304,35 @@ export function AdminDashboard({
       throw new Error("Select a valid filament.");
     }
 
-    const optimisticTask: Task = {
-      id,
-      nameOrLink: draft.nameOrLink.trim(),
-      filamentId,
-      quantity,
-      weightGrams,
-      durationMinutes,
-      estimatedPrice: calculatePricing({
-        weightGrams,
-        durationMinutes,
-        quantity,
-        pricePerKg: filament.pricePerKg,
-        machineHourPrice: settings.machineHourPrice,
-      }).estimatedPrice,
-      finalPrice,
-      status: draft.status,
-      note: draft.note.trim(),
-      createdAt:
-        tasks.find((task) => task.id === id)?.createdAt ?? new Date().toISOString(),
-      filamentLabel: filamentLabel(filament),
-    };
+    const hasWeight = draft.weightGrams.trim() !== "";
+    const hasDuration = draft.durationInput.trim() !== "";
+    if (hasWeight !== hasDuration) {
+      throw new Error("Provide both weight and duration for a manual estimate.");
+    }
+
+    const weightGrams = hasWeight ? Number(draft.weightGrams) : null;
+    const durationMinutes = hasDuration
+      ? parseDurationInput(draft.durationInput)
+      : null;
+
+    if (hasWeight && (!Number.isFinite(weightGrams) || Number(weightGrams) <= 0)) {
+      throw new Error("Weight must be greater than zero.");
+    }
+
+    if (hasDuration && (!durationMinutes || durationMinutes <= 0)) {
+      throw new Error("Duration must be valid minutes or HH:MM.");
+    }
 
     const previousTasks = tasks;
+    const optimisticTask = buildOptimisticTask({
+      currentTask: tasks.find((task) => task.id === id),
+      draft,
+      filament,
+      machineHourPrice: settings.machineHourPrice,
+      weightGrams,
+      durationMinutes,
+    });
+
     setTasks((current) =>
       current.map((task) => (task.id === id ? optimisticTask : task)),
     );
@@ -266,8 +342,8 @@ export function AdminDashboard({
         nameOrLink: optimisticTask.nameOrLink,
         filamentId: optimisticTask.filamentId,
         quantity: optimisticTask.quantity,
-        weightGrams: optimisticTask.weightGrams,
-        durationInput: draft.durationInput,
+        weightGrams,
+        durationInput: hasDuration ? draft.durationInput : null,
         finalPrice: optimisticTask.finalPrice,
         status: optimisticTask.status,
         note: optimisticTask.note,
@@ -278,6 +354,89 @@ export function AdminDashboard({
       );
       setNotice(`Saved task #${id}.`);
       return data.task;
+    } catch (error) {
+      setTasks(previousTasks);
+      throw error;
+    }
+  }
+
+  async function acceptRequest(id: number) {
+    const previousTasks = tasks;
+    const task = tasks.find((item) => item.id === id);
+
+    if (!task) {
+      throw new Error("Task not found.");
+    }
+
+    setTasks((current) =>
+      current.map((item) =>
+        item.id === id
+          ? {
+              ...item,
+              acceptedAt: new Date().toISOString(),
+              finalPrice: item.finalPrice ?? item.estimatedPrice,
+            }
+          : item,
+      ),
+    );
+
+    try {
+      const response = await fetch(`/api/tasks/${id}/accept`, {
+        method: "POST",
+      });
+      const data = (await response.json()) as { task?: Task; error?: string };
+
+      if (!response.ok || !data.task) {
+        throw new Error(data.error ?? "Accept failed.");
+      }
+
+      setTasks((current) =>
+        current.map((item) => (item.id === id ? data.task! : item)),
+      );
+      setNotice(`Accepted request #${id}.`);
+    } catch (error) {
+      setTasks(previousTasks);
+      throw error;
+    }
+  }
+
+  async function retryTaskSlice(sliceJobId: number) {
+    const previousTasks = tasks;
+    const target = tasks.find((task) => task.sliceJobId === sliceJobId);
+    if (!target) {
+      throw new Error("Slice job not found.");
+    }
+
+    setTasks((current) =>
+      current.map((task) =>
+        task.sliceJobId === sliceJobId
+          ? {
+              ...task,
+              estimateState: "pending",
+              estimateError: null,
+              sliceJobStatus: "queued",
+              sliceJobLastError: null,
+              weightGrams: null,
+              durationMinutes: null,
+              estimatedPrice: null,
+            }
+          : task,
+      ),
+    );
+
+    try {
+      const response = await fetch(`/api/slice-jobs/${sliceJobId}/retry`, {
+        method: "POST",
+      });
+      const data = (await response.json()) as { task?: Task; error?: string };
+      if (!response.ok || !data.task) {
+        throw new Error(data.error ?? "Retry failed.");
+      }
+
+      setTasks((current) =>
+        current.map((task) => (task.id === data.task?.id ? data.task : task)),
+      );
+      setNotice(`Queued slice retry for request #${data.task.id}.`);
     } catch (error) {
       setTasks(previousTasks);
       throw error;
@@ -312,12 +471,14 @@ export function AdminDashboard({
                 <tr>
                   <th>Brand</th>
                   <th>Material</th>
-                  <th>Color</th>
-                  <th>Price/kg</th>
-                  <th>Available</th>
-                </tr>
+                <th>Color</th>
+                <th>Price/kg</th>
+                <th>Preset</th>
+                <th>Available</th>
+              </tr>
               </thead>
               <tbody>
+                <NewFilamentRow onCreate={createNewFilament} />
                 {filaments.map((filament) => (
                   <FilamentRow
                     filament={filament}
@@ -342,7 +503,7 @@ export function AdminDashboard({
           <div>
             <p className="eyebrow">Tasks</p>
             <h2 className="mt-1 text-xl font-semibold tracking-[-0.02em] text-foreground">
-              Dense table, quick edits
+              Requests, slicer state, and quick edits
             </h2>
           </div>
 
@@ -366,6 +527,24 @@ export function AdminDashboard({
             </label>
 
             <label className="flex h-11 items-center gap-2 rounded-full border border-border bg-white px-4 text-sm text-muted-foreground">
+              <span>Estimate</span>
+              <select
+                className="bg-transparent text-sm text-foreground outline-none"
+                value={estimateFilter}
+                onChange={(event) =>
+                  setEstimateFilter(event.target.value as "all" | EstimateState)
+                }
+              >
+                <option value="all">All estimates</option>
+                {ESTIMATE_STATES.map((state) => (
+                  <option key={state} value={state}>
+                    {state}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <label className="flex h-11 items-center gap-2 rounded-full border border-border bg-white px-4 text-sm text-muted-foreground">
               <span>Sort</span>
               <select
                 className="bg-transparent text-sm text-foreground outline-none"
@@ -382,7 +561,7 @@ export function AdminDashboard({
         </div>
 
         <div className="overflow-x-auto">
-          <table className="data-table min-w-[1280px]">
+          <table className="data-table min-w-[1480px]">
             <thead>
               <tr>
                 <th>Name / link</th>
@@ -390,19 +569,23 @@ export function AdminDashboard({
                 <th>Qty</th>
                 <th>Weight</th>
                 <th>Duration</th>
+                <th>Estimate</th>
                 <th>Est. price</th>
                 <th>Final price</th>
                 <th>Status</th>
                 <th>Note</th>
+                <th>Actions</th>
               </tr>
             </thead>
             <tbody>
               {visibleTasks.map((task) => (
                 <TaskRow
                   filaments={filaments}
-                  key={`${task.id}-${task.nameOrLink}-${task.filamentId}-${task.quantity}-${task.weightGrams}-${task.durationMinutes}-${task.estimatedPrice}-${task.finalPrice ?? ""}-${task.status}-${task.note}`}
+                  key={`${task.id}-${task.nameOrLink}-${task.filamentId}-${task.quantity}-${task.weightGrams ?? ""}-${task.durationMinutes ?? ""}-${task.estimatedPrice ?? ""}-${task.finalPrice ?? ""}-${task.status}-${task.estimateState}`}
                   machineHourPrice={settings.machineHourPrice}
+                  onAccept={acceptRequest}
                   onCommit={saveTask}
+                  onRetrySlice={retryTaskSlice}
                   task={task}
                 />
               ))}
@@ -447,8 +630,8 @@ function MachinePricePanel({
           Machine hour price
         </h2>
         <p className="text-sm leading-6 text-muted-foreground">
-          One value controls machine cost across all estimates. Changing it
-          refreshes task estimates immediately.
+          One value controls machine cost across ready estimates. Changing it refreshes
+          manual and slicer-backed pricing immediately.
         </p>
       </div>
 
@@ -502,6 +685,7 @@ function FilamentRow({
     material: filament.material,
     color: filament.color,
     pricePerKg: String(filament.pricePerKg),
+    presetKey: filament.presetKey,
     available: filament.available,
   });
   const [error, setError] = useState<string | null>(null);
@@ -516,6 +700,7 @@ function FilamentRow({
             material: saved.material,
             color: saved.color,
             pricePerKg: String(saved.pricePerKg),
+            presetKey: saved.presetKey,
             available: saved.available,
           });
           setError(null);
@@ -526,6 +711,7 @@ function FilamentRow({
             material: filament.material,
             color: filament.color,
             pricePerKg: String(filament.pricePerKg),
+            presetKey: filament.presetKey,
             available: filament.available,
           });
           setError(reason instanceof Error ? reason.message : "Save failed.");
@@ -585,6 +771,22 @@ function FilamentRow({
           {error ? <p className="text-xs text-danger">{error}</p> : null}
         </div>
       </td>
+      <td className="min-w-[240px]">
+        <select
+          className="table-select"
+          value={draft.presetKey}
+          onBlur={() => commit()}
+          onChange={(event) =>
+            setDraft((current) => ({ ...current, presetKey: event.target.value }))
+          }
+        >
+          {PRUSA_PRESET_OPTIONS.map((preset) => (
+            <option key={preset.key} value={preset.key}>
+              {preset.label}
+            </option>
+          ))}
+        </select>
+      </td>
       <td>
         <label className="inline-flex items-center gap-2 rounded-full border border-border bg-white px-3 py-2 text-sm text-foreground">
           <input
@@ -603,30 +805,181 @@ function FilamentRow({
   );
 }
 
+function NewFilamentRow({
+  onCreate,
+}: {
+  onCreate: (draft: FilamentDraft) => Promise<Filament>;
+}) {
+  const [draft, setDraft] = useState<FilamentDraft>({
+    brand: "",
+    material: "",
+    color: "",
+    pricePerKg: "",
+    presetKey: PRUSA_PRESET_OPTIONS[0]?.key ?? "pla-default",
+    available: true,
+  });
+  const [error, setError] = useState<string | null>(null);
+  const [isPending, startTransition] = useTransition();
+
+  const reset = () => {
+    setDraft({
+      brand: "",
+      material: "",
+      color: "",
+      pricePerKg: "",
+      presetKey: PRUSA_PRESET_OPTIONS[0]?.key ?? "pla-default",
+      available: true,
+    });
+  };
+
+  const create = () => {
+    startTransition(() => {
+      void onCreate(draft)
+        .then(() => {
+          reset();
+          setError(null);
+        })
+        .catch((reason: unknown) => {
+          setError(reason instanceof Error ? reason.message : "Create failed.");
+        });
+    });
+  };
+
+  const canCreate =
+    draft.brand.trim() &&
+    draft.material.trim() &&
+    draft.color.trim() &&
+    Number.isFinite(Number(draft.pricePerKg)) &&
+    Number(draft.pricePerKg) > 0;
+
+  return (
+    <tr className="bg-accent-soft/35">
+      <td>
+        <input
+          className="table-input"
+          placeholder="Brand"
+          value={draft.brand}
+          onChange={(event) =>
+            setDraft((current) => ({ ...current, brand: event.target.value }))
+          }
+        />
+      </td>
+      <td>
+        <input
+          className="table-input"
+          placeholder="Material"
+          value={draft.material}
+          onChange={(event) =>
+            setDraft((current) => ({ ...current, material: event.target.value }))
+          }
+        />
+      </td>
+      <td>
+        <input
+          className="table-input"
+          placeholder="Color"
+          value={draft.color}
+          onChange={(event) =>
+            setDraft((current) => ({ ...current, color: event.target.value }))
+          }
+        />
+      </td>
+      <td>
+        <div className="space-y-2">
+          <input
+            className="table-input"
+            inputMode="decimal"
+            placeholder="24.90"
+            value={draft.pricePerKg}
+            onChange={(event) =>
+              setDraft((current) => ({ ...current, pricePerKg: event.target.value }))
+            }
+          />
+          {error ? <p className="text-xs text-danger">{error}</p> : null}
+        </div>
+      </td>
+      <td className="min-w-[240px]">
+        <select
+          className="table-select"
+          value={draft.presetKey}
+          onChange={(event) =>
+            setDraft((current) => ({ ...current, presetKey: event.target.value }))
+          }
+        >
+          {PRUSA_PRESET_OPTIONS.map((preset) => (
+            <option key={preset.key} value={preset.key}>
+              {preset.label}
+            </option>
+          ))}
+        </select>
+      </td>
+      <td>
+        <div className="flex flex-wrap items-center gap-2">
+          <label className="inline-flex items-center gap-2 rounded-full border border-border bg-white px-3 py-2 text-sm text-foreground">
+            <input
+              checked={draft.available}
+              type="checkbox"
+              onChange={(event) =>
+                setDraft((current) => ({
+                  ...current,
+                  available: event.target.checked,
+                }))
+              }
+            />
+            {draft.available ? "Yes" : "No"}
+          </label>
+          <button
+            className="inline-flex h-9 items-center gap-2 rounded-full bg-foreground px-3 text-sm font-medium text-white transition hover:bg-foreground/90 disabled:cursor-not-allowed disabled:bg-foreground/30"
+            disabled={!canCreate || isPending}
+            type="button"
+            onClick={create}
+          >
+            {isPending ? (
+              <LoaderCircle className="size-3 animate-spin" />
+            ) : (
+              <Plus className="size-3" />
+            )}
+            Add
+          </button>
+        </div>
+      </td>
+    </tr>
+  );
+}
+
 function TaskRow({
   task,
   filaments,
   machineHourPrice,
+  onAccept,
   onCommit,
+  onRetrySlice,
 }: {
   task: Task;
   filaments: Filament[];
   machineHourPrice: number;
+  onAccept: (id: number) => Promise<void>;
   onCommit: (id: number, draft: TaskDraft) => Promise<Task>;
+  onRetrySlice: (sliceJobId: number) => Promise<void>;
 }) {
   const [draft, setDraft] = useState<TaskDraft>(taskToDraft(task));
   const [error, setError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
+  const [isRetryPending, startRetryTransition] = useTransition();
+  const [isAcceptPending, startAcceptTransition] = useTransition();
 
   const filament =
     filaments.find((item) => item.id === Number(draft.filamentId)) ?? filaments[0];
   const quantity = Number(draft.quantity);
-  const weightGrams = Number(draft.weightGrams);
-  const durationMinutes = parseDurationInput(draft.durationInput);
+  const hasWeight = draft.weightGrams.trim() !== "";
+  const hasDuration = draft.durationInput.trim() !== "";
+  const weightGrams = hasWeight ? Number(draft.weightGrams) : null;
+  const durationMinutes = hasDuration ? parseDurationInput(draft.durationInput) : null;
   const liveEstimate =
     filament &&
     Number.isFinite(quantity) &&
     quantity > 0 &&
+    weightGrams !== null &&
     Number.isFinite(weightGrams) &&
     weightGrams > 0 &&
     durationMinutes !== null &&
@@ -650,6 +1003,30 @@ function TaskRow({
         .catch((reason: unknown) => {
           setDraft(taskToDraft(task));
           setError(reason instanceof Error ? reason.message : "Save failed.");
+        });
+    });
+  };
+
+  const retrySlice = () => {
+    if (!task.sliceJobId) {
+      return;
+    }
+
+    startRetryTransition(() => {
+      void onRetrySlice(task.sliceJobId!)
+        .then(() => setError(null))
+        .catch((reason: unknown) => {
+          setError(reason instanceof Error ? reason.message : "Retry failed.");
+        });
+    });
+  };
+
+  const accept = () => {
+    startAcceptTransition(() => {
+      void onAccept(task.id)
+        .then(() => setError(null))
+        .catch((reason: unknown) => {
+          setError(reason instanceof Error ? reason.message : "Accept failed.");
         });
     });
   };
@@ -708,6 +1085,7 @@ function TaskRow({
         <input
           className="table-input"
           inputMode="decimal"
+          placeholder="Pending"
           value={draft.weightGrams}
           onBlur={() => commit()}
           onChange={(event) =>
@@ -722,6 +1100,7 @@ function TaskRow({
         <div className="space-y-2">
           <input
             className="table-input"
+            placeholder="Pending"
             value={draft.durationInput}
             onBlur={() => commit()}
             onChange={(event) =>
@@ -736,8 +1115,37 @@ function TaskRow({
           </p>
         </div>
       </td>
+      <td className="min-w-[200px]">
+        <div className="space-y-2">
+          <EstimateBadge
+            estimateError={task.estimateError}
+            estimateState={task.estimateState}
+            sliceJobStatus={task.sliceJobStatus}
+          />
+          {task.estimateError ? (
+            <p className="text-xs leading-5 text-danger">{task.estimateError}</p>
+          ) : null}
+          {task.sliceJobId && task.estimateState === "failed" ? (
+            <button
+              className="inline-flex h-9 items-center gap-2 rounded-full border border-border bg-white px-3 text-xs font-medium text-foreground transition hover:border-accent/30 hover:bg-accent/5 disabled:cursor-not-allowed disabled:opacity-50"
+              disabled={isRetryPending}
+              type="button"
+              onClick={retrySlice}
+            >
+              {isRetryPending ? (
+                <LoaderCircle className="size-3 animate-spin" />
+              ) : (
+                <RotateCcw className="size-3" />
+              )}
+              Retry slice
+            </button>
+          ) : null}
+        </div>
+      </td>
       <td className="w-[130px]">
-        <p className="font-medium text-foreground">{formatCurrency(liveEstimate)}</p>
+        <p className="font-medium text-foreground">
+          {liveEstimate === null ? "Pending" : formatCurrency(liveEstimate)}
+        </p>
       </td>
       <td className="w-[140px]">
         <input
@@ -804,6 +1212,41 @@ function TaskRow({
           ) : null}
         </div>
       </td>
+      <td className="min-w-[190px]">
+        <div className="flex flex-col items-start gap-2">
+          <button
+            className="inline-flex h-9 items-center gap-2 rounded-full border border-border bg-white px-3 text-xs font-medium text-foreground transition hover:border-accent/30 hover:bg-accent/5 disabled:cursor-not-allowed disabled:opacity-50"
+            disabled={
+              Boolean(task.acceptedAt) ||
+              task.estimateState !== "ready" ||
+              isAcceptPending
+            }
+            type="button"
+            onClick={accept}
+          >
+            {isAcceptPending ? (
+              <LoaderCircle className="size-3 animate-spin" />
+            ) : (
+              <Check className="size-3" />
+            )}
+            {task.acceptedAt ? "Accepted" : "Accept"}
+          </button>
+          {task.sourceArtifactId ? (
+            <a
+              className="inline-flex h-9 items-center gap-2 rounded-full border border-border bg-white px-3 text-xs font-medium text-foreground transition hover:border-accent/30 hover:bg-accent/5"
+              href={`/api/artifacts/${task.sourceArtifactId}/download`}
+            >
+              <Download className="size-3" />
+              Download model
+            </a>
+          ) : null}
+          {task.acceptedAt ? (
+            <p className="text-xs text-muted-foreground">
+              Locked {formatDateTime(task.acceptedAt)}
+            </p>
+          ) : null}
+        </div>
+      </td>
     </tr>
   );
 }
@@ -813,8 +1256,8 @@ function taskToDraft(task: Task): TaskDraft {
     nameOrLink: task.nameOrLink,
     filamentId: String(task.filamentId),
     quantity: String(task.quantity),
-    weightGrams: String(task.weightGrams),
-    durationInput: String(task.durationMinutes),
+    weightGrams: task.weightGrams === null ? "" : String(task.weightGrams),
+    durationInput: task.durationMinutes === null ? "" : String(task.durationMinutes),
     finalPrice: task.finalPrice === null ? "" : String(task.finalPrice),
     status: task.status,
     note: task.note,
@@ -835,4 +1278,92 @@ function taskRowClass(status: TaskStatus) {
   }
 
   return "bg-white/56";
+}
+
+function buildOptimisticTask(params: {
+  currentTask?: Task;
+  draft: TaskDraft;
+  filament: Filament;
+  machineHourPrice: number;
+  weightGrams: number | null;
+  durationMinutes: number | null;
+}): Task {
+  const currentTask = params.currentTask;
+  const hasReadyEstimate =
+    params.weightGrams !== null && params.durationMinutes !== null;
+
+  return {
+    id: currentTask?.id ?? 0,
+    nameOrLink: params.draft.nameOrLink.trim(),
+    filamentId: params.filament.id,
+    quantity: Number(params.draft.quantity),
+    weightGrams: params.weightGrams,
+    durationMinutes: params.durationMinutes,
+    estimatedPrice: hasReadyEstimate
+      ? calculatePricing({
+          weightGrams: params.weightGrams!,
+          durationMinutes: params.durationMinutes!,
+          quantity: Number(params.draft.quantity),
+          pricePerKg: params.filament.pricePerKg,
+          machineHourPrice: params.machineHourPrice,
+        }).estimatedPrice
+      : currentTask?.estimatedPrice ?? null,
+    finalPrice:
+      params.draft.finalPrice.trim() === "" ? null : Number(params.draft.finalPrice),
+    status: params.draft.status,
+    acceptedAt: currentTask?.acceptedAt ?? null,
+    submissionState: currentTask?.submissionState ?? "submitted",
+    submittedAt: currentTask?.submittedAt ?? currentTask?.createdAt ?? new Date().toISOString(),
+    estimateState: hasReadyEstimate
+      ? "ready"
+      : (currentTask?.estimateState ?? "pending"),
+    estimateSource: hasReadyEstimate
+      ? "manual"
+      : (currentTask?.estimateSource ?? "prusa"),
+    estimateError: hasReadyEstimate ? null : (currentTask?.estimateError ?? null),
+    note: params.draft.note.trim(),
+    createdAt: currentTask?.createdAt ?? new Date().toISOString(),
+    filamentLabel: filamentLabel(params.filament),
+    sourceArtifactId: currentTask?.sourceArtifactId ?? null,
+    sliceJobId: currentTask?.sliceJobId ?? null,
+    sliceJobStatus: hasReadyEstimate
+      ? currentTask?.sliceJobStatus ?? null
+      : (currentTask?.sliceJobStatus ?? null),
+    sliceJobLastError: hasReadyEstimate ? null : (currentTask?.sliceJobLastError ?? null),
+  };
+}
+
+function EstimateBadge({
+  estimateState,
+  sliceJobStatus,
+  estimateError,
+}: {
+  estimateState: EstimateState;
+  sliceJobStatus: Task["sliceJobStatus"];
+  estimateError: string | null;
+}) {
+  const label =
+    estimateState === "ready"
+      ? "Ready"
+      : estimateState === "failed"
+        ? "Needs review"
+        : sliceJobStatus === "running"
+          ? "Slicing"
+          : "Queued";
+
+  return (
+    <span
+      className={cn(
+        "inline-flex h-8 items-center rounded-full border px-3 text-xs font-semibold uppercase tracking-[0.14em]",
+        estimateState === "ready"
+          ? "border-emerald-200 bg-success-soft text-foreground"
+          : estimateState === "failed"
+            ? "border-rose-200 bg-danger-soft text-foreground"
+            : "border-zinc-200 bg-zinc-100 text-foreground",
+      )}
+      title={estimateError ?? undefined}
+    >
+      {label}
+    </span>
+  );
 }

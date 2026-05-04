@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
+import { enqueueSliceJob } from "@/lib/queue";
 import { parseDurationInput } from "@/lib/pricing";
-import { createTask } from "@/lib/store";
+import { createTask, reportSliceJobFailed } from "@/lib/store";
 import { createTaskSchema } from "@/lib/validators";
 
 export const dynamic = "force-dynamic";
@@ -8,25 +9,55 @@ export const dynamic = "force-dynamic";
 export async function POST(request: Request) {
   try {
     const payload = createTaskSchema.parse(await request.json());
-    const durationMinutes = parseDurationInput(payload.durationInput);
 
-    if (!durationMinutes) {
-      return NextResponse.json(
-        { error: "Duration must be valid minutes or HH:MM." },
-        { status: 400 },
-      );
+    if (payload.mode === "manual") {
+      const durationMinutes = parseDurationInput(payload.durationInput);
+
+      if (!durationMinutes) {
+        return NextResponse.json(
+          { error: "Duration must be valid minutes or HH:MM." },
+          { status: 400 },
+        );
+      }
+
+      const result = createTask({
+        mode: "manual",
+        nameOrLink: payload.nameOrLink,
+        filamentId: payload.filamentId,
+        quantity: payload.quantity,
+        weightGrams: payload.weightGrams,
+        durationMinutes,
+        note: payload.note,
+      });
+
+      return NextResponse.json({ task: result.task });
     }
 
-    const task = createTask({
+    const result = createTask({
+      mode: "upload",
       nameOrLink: payload.nameOrLink,
       filamentId: payload.filamentId,
       quantity: payload.quantity,
-      weightGrams: payload.weightGrams,
-      durationMinutes,
+      sourceArtifactId: payload.sourceArtifactId,
       note: payload.note,
     });
 
-    return NextResponse.json({ task });
+    if (result.queuePayload) {
+      try {
+        await enqueueSliceJob(result.queuePayload);
+      } catch (error) {
+        if (result.queuePayload.sliceJobId) {
+          reportSliceJobFailed(
+            result.queuePayload.sliceJobId,
+            "Slicer queue is unavailable. Manual review required.",
+          );
+        }
+
+        throw error;
+      }
+    }
+
+    return NextResponse.json({ task: result.task });
   } catch (error) {
     return NextResponse.json(
       {

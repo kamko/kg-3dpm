@@ -1,6 +1,12 @@
 import type Database from "better-sqlite3";
 import { calculatePricing } from "@/lib/pricing";
-import type { TaskStatus } from "@/lib/types";
+import { getDefaultPrusaPresetKey } from "@/lib/prusa";
+import type {
+  EstimateSource,
+  EstimateState,
+  SubmissionState,
+  TaskStatus,
+} from "@/lib/types";
 
 const FILAMENTS = [
   {
@@ -8,6 +14,7 @@ const FILAMENTS = [
     material: "PLA Matte",
     color: "Black",
     pricePerKg: 22.9,
+    presetKey: getDefaultPrusaPresetKey("PLA Matte"),
     available: true,
   },
   {
@@ -15,6 +22,7 @@ const FILAMENTS = [
     material: "PLA 2.0",
     color: "Red",
     pricePerKg: 18.9,
+    presetKey: getDefaultPrusaPresetKey("PLA 2.0"),
     available: true,
   },
   {
@@ -22,6 +30,7 @@ const FILAMENTS = [
     material: "PLA 2.0",
     color: "Blue",
     pricePerKg: 18.9,
+    presetKey: getDefaultPrusaPresetKey("PLA 2.0"),
     available: true,
   },
   {
@@ -29,6 +38,7 @@ const FILAMENTS = [
     material: "PETG",
     color: "White",
     pricePerKg: 24.5,
+    presetKey: getDefaultPrusaPresetKey("PETG"),
     available: true,
   },
 ] as const;
@@ -41,6 +51,9 @@ const TASKS: Array<{
   durationMinutes: number;
   finalPrice: number | null;
   status: TaskStatus;
+  submissionState: SubmissionState;
+  estimateState: EstimateState;
+  estimateSource: EstimateSource;
   note: string;
 }> = [
   {
@@ -51,6 +64,9 @@ const TASKS: Array<{
     durationMinutes: 185,
     finalPrice: null,
     status: "new",
+    submissionState: "submitted",
+    estimateState: "ready",
+    estimateSource: "manual",
     note: "Customer requested matte finish.",
   },
   {
@@ -61,6 +77,9 @@ const TASKS: Array<{
     durationMinutes: 140,
     finalPrice: null,
     status: "printing",
+    submissionState: "submitted",
+    estimateState: "ready",
+    estimateSource: "manual",
     note: "Split into two plates.",
   },
   {
@@ -71,6 +90,9 @@ const TASKS: Array<{
     durationMinutes: 255,
     finalPrice: 14.8,
     status: "done",
+    submissionState: "submitted",
+    estimateState: "ready",
+    estimateSource: "prusa",
     note: "Delivered on pickup shelf.",
   },
   {
@@ -81,6 +103,9 @@ const TASKS: Array<{
     durationMinutes: 225,
     finalPrice: null,
     status: "failed",
+    submissionState: "submitted",
+    estimateState: "ready",
+    estimateSource: "manual",
     note: "Layer shift at 70%.",
   },
   {
@@ -91,6 +116,9 @@ const TASKS: Array<{
     durationMinutes: 95,
     finalPrice: null,
     status: "cancelled",
+    submissionState: "submitted",
+    estimateState: "ready",
+    estimateSource: "manual",
     note: "Customer changed scale before production.",
   },
 ] as const;
@@ -105,10 +133,12 @@ export function seedDatabase(
 
   if (reset) {
     db.exec(`
+      DELETE FROM slice_jobs;
+      DELETE FROM artifacts;
       DELETE FROM tasks;
       DELETE FROM filaments;
       DELETE FROM settings;
-      DELETE FROM sqlite_sequence WHERE name IN ('filaments', 'tasks');
+      DELETE FROM sqlite_sequence WHERE name IN ('filaments', 'tasks', 'artifacts', 'slice_jobs');
     `);
   }
 
@@ -128,8 +158,8 @@ export function seedDatabase(
 
   if (filamentCount === 0) {
     const insertFilament = db.prepare(`
-      INSERT INTO filaments (brand, material, color, price_per_kg, available)
-      VALUES (@brand, @material, @color, @pricePerKg, @available)
+      INSERT INTO filaments (brand, material, color, price_per_kg, preset_key, available)
+      VALUES (@brand, @material, @color, @pricePerKg, @presetKey, @available)
     `);
 
     for (const filament of FILAMENTS) {
@@ -166,6 +196,11 @@ export function seedDatabase(
         estimated_price,
         final_price,
         status,
+        submission_state,
+        submitted_at,
+        estimate_state,
+        estimate_source,
+        estimate_error,
         note,
         created_at
       )
@@ -178,6 +213,11 @@ export function seedDatabase(
         @estimatedPrice,
         @finalPrice,
         @status,
+        @submissionState,
+        @submittedAt,
+        @estimateState,
+        @estimateSource,
+        NULL,
         @note,
         @createdAt
       )
@@ -185,6 +225,7 @@ export function seedDatabase(
 
     TASKS.forEach((task, index) => {
       const filament = filamentRows[task.filamentIndex];
+      const createdAt = new Date(Date.now() - index * 3_600_000).toISOString();
       const pricing = calculatePricing({
         weightGrams: task.weightGrams,
         durationMinutes: task.durationMinutes,
@@ -202,8 +243,12 @@ export function seedDatabase(
         estimatedPrice: pricing.estimatedPrice,
         finalPrice: task.finalPrice,
         status: task.status,
+        submissionState: task.submissionState,
+        submittedAt: task.submissionState === "submitted" ? createdAt : null,
+        estimateState: task.estimateState,
+        estimateSource: task.estimateSource,
         note: task.note,
-        createdAt: new Date(Date.now() - index * 3_600_000).toISOString(),
+        createdAt,
       });
     });
   }

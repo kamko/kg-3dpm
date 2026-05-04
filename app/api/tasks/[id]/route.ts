@@ -1,9 +1,28 @@
 import { NextResponse } from "next/server";
 import { parseDurationInput } from "@/lib/pricing";
-import { updateTask } from "@/lib/store";
+import { getTaskById, updateTask } from "@/lib/store";
 import { updateTaskSchema } from "@/lib/validators";
 
 export const dynamic = "force-dynamic";
+
+export async function GET(
+  _request: Request,
+  context: { params: Promise<{ id: string }> },
+) {
+  const { id } = await context.params;
+  const taskId = Number(id);
+
+  if (!Number.isInteger(taskId) || taskId <= 0) {
+    return NextResponse.json({ error: "Invalid task id." }, { status: 400 });
+  }
+
+  const task = getTaskById(taskId);
+  if (!task) {
+    return NextResponse.json({ error: "Task not found." }, { status: 404 });
+  }
+
+  return NextResponse.json({ task });
+}
 
 export async function PATCH(
   request: Request,
@@ -21,9 +40,11 @@ export async function PATCH(
     const parsedDuration =
       payload.durationInput === undefined
         ? undefined
-        : parseDurationInput(payload.durationInput);
+        : payload.durationInput === null
+          ? null
+          : parseDurationInput(payload.durationInput);
 
-    if (payload.durationInput !== undefined && !parsedDuration) {
+    if (payload.durationInput !== undefined && payload.durationInput !== null && !parsedDuration) {
       return NextResponse.json(
         { error: "Duration must be valid minutes or HH:MM." },
         { status: 400 },
@@ -35,7 +56,7 @@ export async function PATCH(
       filamentId: payload.filamentId,
       quantity: payload.quantity,
       weightGrams: payload.weightGrams,
-      ...(parsedDuration ? { durationMinutes: parsedDuration } : {}),
+      durationMinutes: parsedDuration,
       finalPrice: payload.finalPrice,
       status: payload.status,
       note: payload.note,

@@ -1,5 +1,6 @@
 import JSZip from "jszip";
 import { describe, expect, it } from "vitest";
+import { buildAsciiStl, extractTrianglesFrom3mfBuffer } from "../lib/model-geometry";
 import { analyze3mfBuffer, analyzeStlBuffer } from "../lib/stl-estimate";
 
 const asciiCube = `solid cube
@@ -168,5 +169,52 @@ describe("analyze3mfBuffer", () => {
     expect(analysis.inferredSize).toBe("tiny");
     expect(analysis.estimatedWeightGrams).toBeGreaterThanOrEqual(3);
     expect(analysis.estimatedDurationMinutes).toBeGreaterThanOrEqual(15);
+  });
+
+  it("flattens component-based 3MF geometry for cross-slicer compatibility", async () => {
+    const zip = new JSZip();
+    zip.file(
+      "3D/3dmodel.model",
+      `<?xml version="1.0" encoding="UTF-8"?>
+      <model unit="millimeter" xmlns="http://schemas.microsoft.com/3dmanufacturing/core/2015/02">
+        <resources>
+          <object id="1" type="model">
+            <mesh>
+              <vertices>
+                <vertex x="0" y="0" z="0"/>
+                <vertex x="10" y="0" z="0"/>
+                <vertex x="0" y="10" z="0"/>
+              </vertices>
+              <triangles>
+                <triangle v1="0" v2="1" v3="2"/>
+              </triangles>
+            </mesh>
+          </object>
+          <object id="2" type="model">
+            <components>
+              <component objectid="1" transform="1 0 0 0 1 0 0 0 1 20 0 0"/>
+              <component objectid="1" transform="1 0 0 0 1 0 0 0 1 0 20 0"/>
+            </components>
+          </object>
+        </resources>
+        <build>
+          <item objectid="2"/>
+        </build>
+      </model>`,
+    );
+
+    const buffer = await zip.generateAsync({ type: "arraybuffer" });
+    const triangles = await extractTrianglesFrom3mfBuffer(buffer);
+    const stl = buildAsciiStl(triangles, "components");
+    const analysis = analyzeStlBuffer(new TextEncoder().encode(stl).buffer, "PLA");
+
+    expect(triangles).toHaveLength(2);
+    expect(analysis.triangleCount).toBe(2);
+    expect(analysis.dimensionsMm).toEqual({
+      x: 30,
+      y: 30,
+      z: 0,
+      max: 30,
+    });
   });
 });

@@ -14,7 +14,7 @@ export default function Home() {
             3D print request
           </p>
           <p className="mt-1 text-sm text-muted-foreground">
-            Upload a model or enter slicer values to get a quick estimate.
+            Upload a model for real slicer pricing, or enter exact slicer values if you already have them.
           </p>
         </div>
       </header>

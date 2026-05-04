@@ -24,6 +24,10 @@ export function formatDuration(minutes: number) {
     .padStart(2, "0")}`;
 }
 
+export function formatGrams(value: number) {
+  return `${Number.isInteger(value) ? value : value.toFixed(1)} g`;
+}
+
 export function filamentLabel(filament: Pick<Filament, "brand" | "material" | "color">) {
   return [filament.brand, filament.material, filament.color].join(" ");
 }
