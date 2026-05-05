@@ -98,6 +98,12 @@ The repository now includes a self-contained MVP deployment stack:
 docker compose up --build
 ```
 
+For pull-based deployment using the published GitHub Container Registry images:
+
+```bash
+docker compose -f docker-compose.images.yml up -d
+```
+
 Services:
 
 - `web` on [http://localhost:3000](http://localhost:3000)
@@ -112,6 +118,16 @@ You can also build the runtime images directly without Compose:
 docker build -t kg-3dpm-web -f Dockerfile .
 docker build -t kg-3dpm-worker -f worker/Dockerfile .
 ```
+
+The published-image Compose file is [docker-compose.images.yml](/C:/Users/kamko/Documents/New%20project%202/docker-compose.images.yml). By default it pulls:
+
+- `ghcr.io/kamko/kg-3dpm-web:latest`
+- `ghcr.io/kamko/kg-3dpm-worker:latest`
+
+You can override those tags with:
+
+- `KG3DPM_WEB_IMAGE`
+- `KG3DPM_WORKER_IMAGE`
 
 ## Container publishing
 

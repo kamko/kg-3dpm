@@ -1,0 +1,118 @@
+services:
+  web:
+    image: ${KG3DPM_WEB_IMAGE:-ghcr.io/kamko/kg-3dpm-web:latest}
+    pull_policy: always
+    depends_on:
+      redis:
+        condition: service_started
+      rustfs:
+        condition: service_healthy
+      rustfs-perms:
+        condition: service_completed_successfully
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      DATABASE_DIR: /app/data
+      APP_BASE_URL: http://localhost:3000
+      APP_INTERNAL_BASE_URL: http://web:3000
+      REDIS_URL: redis://redis:6379
+      S3_ENDPOINT: http://rustfs:9000
+      S3_REGION: us-east-1
+      S3_ACCESS_KEY: rustfsadmin
+      S3_SECRET_KEY: rustfsadmin
+      S3_FORCE_PATH_STYLE: "true"
+      STORAGE_BUCKET: kg-3dpm
+      SLICE_WORKER_SECRET: change-me-in-production
+    ports:
+      - "3000:3000"
+    volumes:
+      - app_data:/app/data
+    restart: unless-stopped
+
+  worker:
+    image: ${KG3DPM_WORKER_IMAGE:-ghcr.io/kamko/kg-3dpm-worker:latest}
+    pull_policy: always
+    depends_on:
+      redis:
+        condition: service_started
+      rustfs:
+        condition: service_healthy
+      rustfs-perms:
+        condition: service_completed_successfully
+      web:
+        condition: service_started
+    environment:
+      NODE_ENV: production
+      APP_INTERNAL_BASE_URL: http://web:3000
+      REDIS_URL: redis://redis:6379
+      S3_ENDPOINT: http://rustfs:9000
+      S3_REGION: us-east-1
+      S3_ACCESS_KEY: rustfsadmin
+      S3_SECRET_KEY: rustfsadmin
+      S3_FORCE_PATH_STYLE: "true"
+      STORAGE_BUCKET: kg-3dpm
+      SLICE_WORKER_SECRET: change-me-in-production
+      PRUSA_SLICER_BIN: prusa-slicer
+      PRUSA_CONFIG_DEFAULT: /app/worker/presets/pla-default.ini
+      PRUSA_CONFIG_PLA_DEFAULT: /app/worker/presets/pla-default.ini
+      PRUSA_CONFIG_PETG_DEFAULT: /app/worker/presets/petg-default.ini
+      SLICE_JOB_TIMEOUT_MS: "600000"
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 256
+    mem_limit: 2g
+    cpus: 1.0
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    restart: unless-stopped
+
+  rustfs-perms:
+    image: alpine:3.22
+    user: root
+    volumes:
+      - rustfs_data:/fix_path
+    command: ["sh", "-c", "chown -R 10001:10001 /fix_path"]
+    restart: "no"
+
+  rustfs:
+    image: rustfs/rustfs:latest
+    depends_on:
+      rustfs-perms:
+        condition: service_completed_successfully
+    environment:
+      RUSTFS_VOLUMES: /data
+      RUSTFS_ADDRESS: 0.0.0.0:9000
+      RUSTFS_CONSOLE_ADDRESS: 0.0.0.0:9001
+      RUSTFS_CONSOLE_ENABLE: "true"
+      RUSTFS_ACCESS_KEY: rustfsadmin
+      RUSTFS_SECRET_KEY: rustfsadmin
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - rustfs_data:/data
+    restart: unless-stopped
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "sh",
+          "-c",
+          "curl -f http://127.0.0.1:9000/health && curl -f http://127.0.0.1:9001/rustfs/console/health",
+        ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+volumes:
+  app_data:
+  rustfs_data:
