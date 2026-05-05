@@ -3,12 +3,7 @@ import { promises as fs } from "node:fs";
 import path from "node:path";
 import { promisify } from "node:util";
 import { getSliceJobTimeoutMs } from "@/lib/env";
-import {
-  buildAsciiStl,
-  extractBambu3mfSliceMetadata,
-  extractTrianglesFrom3mfBuffer,
-  isBambuProject3mfBuffer,
-} from "@/lib/model-geometry";
+import { extractBambu3mfSliceMetadata } from "@/lib/model-geometry";
 import {
   getPrusaConfigPath,
   parsePrusaGcodeMetadata,
@@ -55,8 +50,6 @@ export class PrusaSlicerEngine implements SlicerEngine {
     const primarySource = input.sourceFiles[0];
     const fileExtension = path.extname(primarySource.originalName).toLowerCase();
     const binary = process.env.PRUSA_SLICER_BIN ?? "prusa-slicer";
-    let stdout = "";
-    let stderr = "";
 
     if (fileExtension === ".3mf") {
       if (input.sourceFiles.length > 1) {
@@ -68,9 +61,7 @@ export class PrusaSlicerEngine implements SlicerEngine {
         sourceBuffer.byteOffset,
         sourceBuffer.byteOffset + sourceBuffer.byteLength,
       ) as ArrayBuffer;
-      const embeddedMetadata = await extractBambu3mfSliceMetadata(
-        arrayBuffer,
-      );
+      const embeddedMetadata = await extractBambu3mfSliceMetadata(arrayBuffer);
 
       if (embeddedMetadata) {
         return {
@@ -80,75 +71,24 @@ export class PrusaSlicerEngine implements SlicerEngine {
           logText: "Using embedded 3MF slice metadata from the uploaded project.",
         } satisfies SliceEngineResult;
       }
-
-      const isBambuProject = await isBambuProject3mfBuffer(arrayBuffer);
-
-      try {
-        if (isBambuProject) {
-          throw new Error(
-            "Bambu project 3MF does not include embedded slice values, converting to STL for fallback slicing.",
-          );
-        }
-
-        const result = await execFileAsync(
-          binary,
-          ["--export-gcode", "--output", outputPath, primarySource.path],
-          {
-            timeout: getSliceJobTimeoutMs(),
-            cwd: input.workDir,
-            maxBuffer: 10 * 1024 * 1024,
-          },
-        );
-        stdout = result.stdout;
-        stderr = result.stderr;
-        ensureValidSliceMetrics(parsePrusaGcodeMetadata(await fs.readFile(outputPath, "utf8")));
-      } catch (error) {
-        const fallbackPath = await convert3mfToStl(primarySource.path, input.workDir);
-        const result = await execFileAsync(
-          binary,
-          [
-            "--load",
-            getPrusaConfigPath(input.presetKey),
-            "--export-gcode",
-            "--output",
-            outputPath,
-            fallbackPath,
-          ],
-          {
-            timeout: getSliceJobTimeoutMs(),
-            cwd: input.workDir,
-            maxBuffer: 10 * 1024 * 1024,
-          },
-        );
-        stdout = [
-          error instanceof Error ? error.message : "Direct 3MF load failed.",
-          "Falling back to flattened STL conversion.",
-          result.stdout,
-        ]
-          .filter(Boolean)
-          .join("\n");
-        stderr = result.stderr;
-      }
-    } else {
-      const result = await execFileAsync(
-        binary,
-        [
-          "--load",
-          getPrusaConfigPath(input.presetKey),
-          "--export-gcode",
-          "--output",
-          outputPath,
-          ...input.sourceFiles.map((sourceFile) => sourceFile.path),
-        ],
-        {
-          timeout: getSliceJobTimeoutMs(),
-          cwd: input.workDir,
-          maxBuffer: 10 * 1024 * 1024,
-        },
-      );
-      stdout = result.stdout;
-      stderr = result.stderr;
     }
+
+    const { stdout, stderr } = await execFileAsync(
+      binary,
+      [
+        "--load",
+        getPrusaConfigPath(input.presetKey),
+        "--export-gcode",
+        "--output",
+        outputPath,
+        ...input.sourceFiles.map((sourceFile) => sourceFile.path),
+      ],
+      {
+        timeout: getSliceJobTimeoutMs(),
+        cwd: input.workDir,
+        maxBuffer: 10 * 1024 * 1024,
+      },
+    );
 
     const gcode = await fs.readFile(outputPath, "utf8");
     const metadata = parsePrusaGcodeMetadata(gcode);
@@ -183,19 +123,3 @@ function ensureValidSliceMetrics(metadata: {
   }
 }
 
-async function convert3mfToStl(sourcePath: string, workDir: string) {
-  const buffer = await fs.readFile(sourcePath);
-  const triangles = await extractTrianglesFrom3mfBuffer(
-    buffer.buffer.slice(
-      buffer.byteOffset,
-      buffer.byteOffset + buffer.byteLength,
-    ) as ArrayBuffer,
-  );
-  const fallbackPath = path.join(workDir, "flattened-from-3mf.stl");
-  await fs.writeFile(
-    fallbackPath,
-    buildAsciiStl(triangles, path.basename(sourcePath, ".3mf")),
-    "utf8",
-  );
-  return fallbackPath;
-}

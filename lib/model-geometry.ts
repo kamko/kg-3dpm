@@ -69,7 +69,9 @@ export async function extractTrianglesFrom3mfBuffer(buffer: ArrayBuffer) {
 
   for (const entry of modelEntries) {
     const xml = await entry.async("string");
-    triangles.push(...parse3mfModelTriangles(xml));
+    for (const triangle of parse3mfModelTriangles(xml)) {
+      triangles.push(triangle);
+    }
   }
 
   if (triangles.length === 0) {
@@ -192,20 +194,27 @@ function parse3mfModelTriangles(xml: string) {
         continue;
       }
 
-      triangles.push(
-        ...resolveObjectTriangles(
-          objectId,
-          objectMap,
-          parse3mfTransform(attrs.match(/\btransform="([^"]+)"/)?.[1]),
-          activeIds,
-        ),
+      const resolved = resolveObjectTriangles(
+        objectId,
+        objectMap,
+        parse3mfTransform(attrs.match(/\btransform="([^"]+)"/)?.[1]),
+        activeIds,
       );
+      for (const triangle of resolved) {
+        triangles.push(triangle);
+      }
     }
   } else {
     for (const objectId of objectMap.keys()) {
-      triangles.push(
-        ...resolveObjectTriangles(objectId, objectMap, identityMatrix, activeIds),
+      const resolved = resolveObjectTriangles(
+        objectId,
+        objectMap,
+        identityMatrix,
+        activeIds,
       );
+      for (const triangle of resolved) {
+        triangles.push(triangle);
+      }
     }
   }
 
