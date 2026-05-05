@@ -25,7 +25,7 @@ function runMigrations(db: Database.Database) {
   db.pragma("foreign_keys = OFF");
   migrateFilamentsTable(db);
   migrateTasksTable(db);
-  rebuildTablesWithLegacyTaskRefs(db);
+  rebuildTablesWithLegacyRefs(db);
   db.exec(fs.readFileSync(schemaPath, "utf8"));
   db.pragma("foreign_keys = ON");
 }
@@ -51,42 +51,16 @@ function migrateFilamentsTable(db: Database.Database) {
   }
 
   db.exec(`
-    ALTER TABLE filaments RENAME TO filaments_legacy;
+    ALTER TABLE filaments
+    ADD COLUMN preset_key TEXT NOT NULL DEFAULT 'pla-default';
 
-    CREATE TABLE filaments (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      brand TEXT NOT NULL,
-      material TEXT NOT NULL,
-      color TEXT NOT NULL,
-      price_per_kg REAL NOT NULL CHECK (price_per_kg > 0),
-      preset_key TEXT NOT NULL,
-      available INTEGER NOT NULL DEFAULT 1 CHECK (available IN (0, 1))
-    );
-
-    INSERT INTO filaments (
-      id,
-      brand,
-      material,
-      color,
-      price_per_kg,
-      preset_key,
-      available
-    )
-    SELECT
-      id,
-      brand,
-      material,
-      color,
-      price_per_kg,
-      CASE
-        WHEN UPPER(material) = 'PETG' THEN 'petg-default'
-        WHEN UPPER(material) LIKE '%MATTE%' THEN 'pla-matte-default'
-        ELSE 'pla-default'
-      END,
-      available
-    FROM filaments_legacy;
-
-    DROP TABLE filaments_legacy;
+    UPDATE filaments
+    SET preset_key = CASE
+      WHEN UPPER(material) = 'PETG' THEN 'petg-default'
+      WHEN UPPER(material) LIKE '%MATTE%' THEN 'pla-matte-default'
+      ELSE 'pla-default'
+    END
+    WHERE preset_key IS NULL OR preset_key = 'pla-default';
   `);
 }
 
@@ -110,8 +84,19 @@ function migrateTasksTable(db: Database.Database) {
     (column) => column.name === "submission_state",
   );
   const hasAcceptedAt = columns.some((column) => column.name === "accepted_at");
+  const filamentRefs = db
+    .prepare("PRAGMA foreign_key_list(tasks)")
+    .all() as Array<{ table: string }>;
+  const hasLegacyFilamentRef = filamentRefs.some(
+    (reference) => reference.table !== "filaments",
+  );
 
-  if (hasEstimateState && hasSubmissionState && hasAcceptedAt) {
+  if (
+    hasEstimateState &&
+    hasSubmissionState &&
+    hasAcceptedAt &&
+    !hasLegacyFilamentRef
+  ) {
     return;
   }
 
@@ -189,13 +174,18 @@ function migrateTasksTable(db: Database.Database) {
   `);
 }
 
-function rebuildTablesWithLegacyTaskRefs(db: Database.Database) {
+function rebuildTablesWithLegacyRefs(db: Database.Database) {
   const artifactsRefs = db
     .prepare("PRAGMA foreign_key_list(artifacts)")
     .all() as Array<{ table: string }>;
   const sliceJobRefs = db
     .prepare("PRAGMA foreign_key_list(slice_jobs)")
     .all() as Array<{ table: string }>;
+  const filamentLegacyTables = db
+    .prepare(
+      "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'filaments_legacy'",
+    )
+    .all() as Array<{ name: string }>;
 
   if (artifactsRefs.some((reference) => reference.table === "tasks_legacy")) {
     db.exec(`
@@ -288,6 +278,10 @@ function rebuildTablesWithLegacyTaskRefs(db: Database.Database) {
 
       DROP TABLE slice_jobs_legacy;
     `);
+  }
+
+  if (filamentLegacyTables.length > 0) {
+    db.exec("DROP TABLE filaments_legacy;");
   }
 }
 

@@ -4,7 +4,8 @@ import { formatCurrency, formatGrams } from "@/lib/utils";
 
 type PriceBreakdownProps = {
   filamentUsageGrams?: number | null;
-  filamentRateLabel?: string | null;
+  filamentLabel?: string | null;
+  filamentPricePerKg?: number | null;
   materialCost: number | null;
   machineCost: number | null;
   total: number | null;
@@ -22,7 +23,8 @@ function valueOrPending(value: number | null, pendingLabel: string | null | unde
 
 export function PriceBreakdown({
   filamentUsageGrams,
-  filamentRateLabel,
+  filamentLabel,
+  filamentPricePerKg,
   materialCost,
   machineCost,
   total,
@@ -43,29 +45,39 @@ export function PriceBreakdown({
       </div>
 
       <dl className="space-y-3 text-sm">
-        {filamentRateLabel ? (
-          <div className="flex items-center justify-between gap-4 rounded-2xl bg-white/75 px-4 py-3">
+        {filamentLabel ? (
+          <div className="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-3 rounded-2xl bg-white/75 px-4 py-3">
             <dt className="text-muted-foreground">Selected filament</dt>
-            <dd className="font-medium text-foreground">{filamentRateLabel}</dd>
+            <dd className="min-w-0 text-right font-medium text-foreground break-words">
+              {filamentLabel}
+            </dd>
           </div>
         ) : null}
-        <div className="flex items-center justify-between gap-4 rounded-2xl bg-white/75 px-4 py-3">
+        {filamentPricePerKg !== null && filamentPricePerKg !== undefined ? (
+          <div className="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-3 rounded-2xl bg-white/75 px-4 py-3">
+            <dt className="text-muted-foreground">Price per kg</dt>
+            <dd className="text-right font-medium text-foreground">
+              {formatCurrency(filamentPricePerKg)} / kg
+            </dd>
+          </div>
+        ) : null}
+        <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3 rounded-2xl bg-white/75 px-4 py-3">
           <dt className="text-muted-foreground">Filament usage</dt>
-          <dd className="font-medium text-foreground">
+          <dd className="text-right font-medium text-foreground">
             {filamentUsageGrams === null || filamentUsageGrams === undefined
               ? pendingLabel ?? "Pending"
               : formatGrams(filamentUsageGrams)}
           </dd>
         </div>
-        <div className="flex items-center justify-between gap-4 rounded-2xl bg-white/75 px-4 py-3">
+        <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3 rounded-2xl bg-white/75 px-4 py-3">
           <dt className="text-muted-foreground">Material cost</dt>
-          <dd className="font-medium text-foreground">
+          <dd className="text-right font-medium text-foreground">
             {valueOrPending(materialCost, pendingLabel)}
           </dd>
         </div>
-        <div className="flex items-center justify-between gap-4 rounded-2xl bg-white/75 px-4 py-3">
+        <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3 rounded-2xl bg-white/75 px-4 py-3">
           <dt className="text-muted-foreground">Machine cost</dt>
-          <dd className="font-medium text-foreground">
+          <dd className="text-right font-medium text-foreground">
             {valueOrPending(machineCost, pendingLabel)}
           </dd>
         </div>

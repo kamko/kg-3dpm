@@ -79,6 +79,39 @@ export async function extractTrianglesFrom3mfBuffer(buffer: ArrayBuffer) {
   return triangles;
 }
 
+export async function extractBambu3mfSliceMetadata(buffer: ArrayBuffer) {
+  const zip = await JSZip.loadAsync(buffer);
+  const sliceInfo = zip.file("Metadata/slice_info.config");
+
+  if (!sliceInfo) {
+    return null;
+  }
+
+  const xml = await sliceInfo.async("string");
+  const prediction = xml.match(/\bkey="prediction"\s+value="([^"]+)"/)?.[1];
+  const weight = xml.match(/\bkey="weight"\s+value="([^"]+)"/)?.[1];
+
+  if (!prediction || !weight) {
+    return null;
+  }
+
+  const durationSeconds = Number(prediction);
+  const weightGrams = Number(weight);
+
+  if (!Number.isFinite(durationSeconds) || durationSeconds <= 0) {
+    return null;
+  }
+
+  if (!Number.isFinite(weightGrams) || weightGrams <= 0) {
+    return null;
+  }
+
+  return {
+    durationMinutes: Math.max(1, Math.round(durationSeconds / 60)),
+    weightGrams: Math.round(weightGrams * 100) / 100,
+  };
+}
+
 export function buildAsciiStl(triangles: Triangle[], solidName = "model") {
   const lines = [`solid ${solidName}`];
 

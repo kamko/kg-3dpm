@@ -1,6 +1,10 @@
 import JSZip from "jszip";
 import { describe, expect, it } from "vitest";
-import { buildAsciiStl, extractTrianglesFrom3mfBuffer } from "../lib/model-geometry";
+import {
+  buildAsciiStl,
+  extractBambu3mfSliceMetadata,
+  extractTrianglesFrom3mfBuffer,
+} from "../lib/model-geometry";
 import { analyze3mfBuffer, analyzeStlBuffer } from "../lib/stl-estimate";
 
 const asciiCube = `solid cube
@@ -215,6 +219,26 @@ describe("analyze3mfBuffer", () => {
       y: 30,
       z: 0,
       max: 30,
+    });
+  });
+
+  it("reads embedded Bambu slice metadata when present", async () => {
+    const zip = new JSZip();
+    zip.file(
+      "Metadata/slice_info.config",
+      `<?xml version="1.0" encoding="UTF-8"?>
+      <config>
+        <plate>
+          <metadata key="prediction" value="8282"/>
+          <metadata key="weight" value="109.45"/>
+        </plate>
+      </config>`,
+    );
+
+    const buffer = await zip.generateAsync({ type: "arraybuffer" });
+    await expect(extractBambu3mfSliceMetadata(buffer)).resolves.toEqual({
+      durationMinutes: 138,
+      weightGrams: 109.45,
     });
   });
 });

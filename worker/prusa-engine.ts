@@ -3,7 +3,11 @@ import { promises as fs } from "node:fs";
 import path from "node:path";
 import { promisify } from "node:util";
 import { getSliceJobTimeoutMs } from "@/lib/env";
-import { buildAsciiStl, extractTrianglesFrom3mfBuffer } from "@/lib/model-geometry";
+import {
+  buildAsciiStl,
+  extractBambu3mfSliceMetadata,
+  extractTrianglesFrom3mfBuffer,
+} from "@/lib/model-geometry";
 import {
   getPrusaConfigPath,
   parsePrusaGcodeMetadata,
@@ -45,6 +49,23 @@ export class PrusaSlicerEngine implements SlicerEngine {
     let stderr = "";
 
     if (fileExtension === ".3mf") {
+      const sourceBuffer = await fs.readFile(input.sourcePath);
+      const embeddedMetadata = await extractBambu3mfSliceMetadata(
+        sourceBuffer.buffer.slice(
+          sourceBuffer.byteOffset,
+          sourceBuffer.byteOffset + sourceBuffer.byteLength,
+        ) as ArrayBuffer,
+      );
+
+      if (embeddedMetadata) {
+        return {
+          weightGrams: embeddedMetadata.weightGrams,
+          durationMinutes: embeddedMetadata.durationMinutes,
+          generatedFiles: [],
+          logText: "Using embedded 3MF slice metadata from the uploaded project.",
+        } satisfies SliceEngineResult;
+      }
+
       try {
         const result = await execFileAsync(
           binary,

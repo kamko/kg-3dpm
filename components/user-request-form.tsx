@@ -8,7 +8,6 @@ import {
   LoaderCircle,
   Package2,
   Send,
-  Sparkles,
 } from "lucide-react";
 import type { ReactNode } from "react";
 import { useEffect, useState } from "react";
@@ -143,15 +142,15 @@ export function UserRequestForm({
 
   const priceDescription = confirmation
     ? isEstimatePending
-      ? "We are slicing the selected model now. The cost breakdown will fill in as soon as the estimate is ready."
+      ? "The slicer is running now. Pricing will fill in as soon as the estimate is ready."
       : isEstimateFailed
-        ? "The estimate could not be completed automatically. The request has not been sent yet."
+        ? "The estimate could not be completed automatically yet."
         : isSubmitted
-          ? "This is the final estimate that was reviewed and sent with the request."
-          : "Review this estimate, then send the request when everything looks right."
+          ? "This is the estimate that was sent with the request."
+          : "Review the estimate, then send the request when it looks right."
     : inputMode === "manual"
-      ? "Manual slicer values price instantly so you can send the request right away."
-      : "Choose a model file to run a real slicer estimate before you send the request.";
+      ? "Manual slicer values price instantly."
+      : "Choose a model file to run a real slicer estimate.";
 
   const pricePendingLabel = confirmation
     ? isEstimatePending
@@ -162,12 +161,12 @@ export function UserRequestForm({
     : inputMode === "upload"
       ? "Estimate first"
       : null;
+
   const activeFilamentForPricing = confirmedFilament ?? selectedFilament ?? null;
-  const filamentRateLabel = activeFilamentForPricing
-    ? `${publicFilamentLabel(activeFilamentForPricing)} · ${formatCurrency(
-        activeFilamentForPricing.pricePerKg,
-      )} / kg`
+  const priceFilamentLabel = activeFilamentForPricing
+    ? publicFilamentLabel(activeFilamentForPricing)
     : null;
+  const priceFilamentPerKg = activeFilamentForPricing?.pricePerKg ?? null;
   const filamentUsageGrams = confirmation
     ? confirmation.weightGrams
     : inputMode === "manual" &&
@@ -362,16 +361,35 @@ export function UserRequestForm({
     }
   };
 
+  const initialSteps: WorkflowStep[] =
+    inputMode === "manual"
+      ? [
+          { label: "Details", status: "done" },
+          { label: "Send", status: "current" },
+        ]
+      : [
+          { label: "Details", status: "current" },
+          { label: "Estimate", status: "upcoming" },
+          { label: "Send", status: "upcoming" },
+        ];
+
   return (
     <section className="grid gap-6 lg:grid-cols-[minmax(0,1.2fr)_360px]">
-      <form className="surface flex flex-col gap-6 p-5 sm:p-7" onSubmit={handleEstimateSubmit}>
+      <form
+        className="surface flex flex-col gap-6 p-5 sm:p-7"
+        onSubmit={handleEstimateSubmit}
+      >
         {!confirmation ? (
           <>
+            <WorkflowHeader
+              currentLabel={inputMode === "manual" ? "Direct request" : "Add details"}
+              headline={inputMode === "manual" ? "2 steps" : "Step 1 of 3"}
+              steps={initialSteps}
+            />
+
             <div className="grid gap-4 md:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)]">
               <label className="space-y-2">
-                <span className="text-sm font-medium text-foreground">
-                  Model link or name
-                </span>
+                <FieldLabel label="Model link or name" required />
                 <input
                   autoFocus
                   className="field"
@@ -388,7 +406,7 @@ export function UserRequestForm({
               </label>
 
               <label className="space-y-2">
-                <span className="text-sm font-medium text-foreground">Filament</span>
+                <FieldLabel label="Filament" required />
                 <select
                   className="field"
                   name="filamentId"
@@ -409,125 +427,81 @@ export function UserRequestForm({
               </label>
             </div>
 
-            <div className="flex flex-col gap-3 rounded-[24px] border border-border/80 bg-white/72 p-4 sm:flex-row sm:items-center sm:justify-between">
-              <div>
-                <p className="text-sm font-medium text-foreground">Estimate source</p>
-                <p className="mt-1 text-sm leading-6 text-muted-foreground">
-                  Upload a model to calculate a real slicer estimate first, or enter
-                  exact slicer values if you already have them.
-                </p>
+            <div className="grid gap-3 rounded-[24px] border border-border/80 bg-white/72 p-4">
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                <div className="space-y-1">
+                  <FieldLabel label="Estimate method" required />
+                  <p className="text-sm text-muted-foreground">
+                    {inputMode === "upload"
+                      ? "Upload a model and estimate it first."
+                      : "Use exact slicer values if you already have them."}
+                  </p>
+                </div>
+                <div className="grid grid-cols-2 gap-1.5 rounded-[20px] border border-border bg-background p-1.5">
+                  <button
+                    className={cn(
+                      "min-h-[48px] rounded-[14px] px-4 py-2.5 text-sm font-medium transition",
+                      inputMode === "upload"
+                        ? "bg-foreground text-white"
+                        : "text-muted-foreground hover:text-foreground",
+                    )}
+                    type="button"
+                    onClick={() => setInputMode("upload")}
+                  >
+                    Model file
+                  </button>
+                  <button
+                    className={cn(
+                      "min-h-[48px] rounded-[14px] px-4 py-2.5 text-sm font-medium transition",
+                      inputMode === "manual"
+                        ? "bg-foreground text-white"
+                        : "text-muted-foreground hover:text-foreground",
+                    )}
+                    type="button"
+                    onClick={() => setInputMode("manual")}
+                  >
+                    Slicer values
+                  </button>
+                </div>
               </div>
-              <div className="grid grid-cols-2 gap-1.5 rounded-[22px] border border-border bg-background p-1.5">
-                <button
-                  className={cn(
-                    "min-h-[52px] rounded-[16px] px-4 py-3 text-sm font-medium leading-5 transition",
-                    inputMode === "upload"
-                      ? "bg-foreground text-white"
-                      : "text-muted-foreground hover:text-foreground",
-                  )}
-                  type="button"
-                  onClick={() => setInputMode("upload")}
-                >
-                  Model file
-                </button>
-                <button
-                  className={cn(
-                    "min-h-[52px] rounded-[16px] px-4 py-3 text-sm font-medium leading-5 transition",
-                    inputMode === "manual"
-                      ? "bg-foreground text-white"
-                      : "text-muted-foreground hover:text-foreground",
-                  )}
-                  type="button"
-                  onClick={() => setInputMode("manual")}
-                >
-                  Slicer values
-                </button>
-              </div>
-            </div>
 
-            {inputMode === "upload" ? (
-              <WizardStatus
-                currentLabel="Add details"
-                headline="Step 1 of 3"
-                steps={[
-                  { label: "Add details", status: "current" },
-                  { label: "Estimate cost", status: "upcoming" },
-                  { label: "Send request", status: "upcoming" },
-                ]}
-              />
-            ) : null}
-
-            {inputMode === "upload" ? (
-              <div className="rounded-[24px] border border-border/80 bg-white/72 p-4 sm:p-5">
-                <div className="flex items-start gap-3">
-                  <FileUp className="mt-0.5 size-4 text-muted-foreground" />
-                  <div className="min-w-0 flex-1 space-y-4">
+              {inputMode === "upload" ? (
+                <div className="rounded-[22px] border border-border/70 bg-background px-4 py-4">
+                  <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
                     <div className="space-y-1">
+                      <FieldLabel label="Model file" required />
+                      <p className="text-sm text-muted-foreground">STL or 3MF</p>
+                    </div>
+                    <label className="inline-flex h-11 cursor-pointer items-center justify-center rounded-full border border-border bg-white px-4 text-sm font-medium text-foreground transition hover:border-accent/30 hover:bg-accent/5">
+                      <input
+                        accept=".stl,.3mf"
+                        className="sr-only"
+                        type="file"
+                        onChange={(event) =>
+                          setModelFile(event.target.files?.[0] ?? null)
+                        }
+                      />
+                      {modelFile ? "Replace file" : "Choose file"}
+                    </label>
+                  </div>
+                  <div className="mt-4 flex items-start gap-3 rounded-2xl border border-border/70 bg-white/80 px-4 py-3">
+                    <FileUp className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
+                    <div className="min-w-0">
                       <p className="text-sm font-medium text-foreground">
-                        Step 1, choose a model file
+                        {modelFile ? modelFile.name : "No file selected"}
                       </p>
-                      <p className="text-sm leading-6 text-muted-foreground">
-                        We will slice the model first, show you the estimate, then let
-                        you decide whether to send the request.
-                      </p>
-                    </div>
-
-                    <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                      <label className="inline-flex h-11 cursor-pointer items-center justify-center rounded-full border border-border bg-white px-4 text-sm font-medium text-foreground transition hover:border-accent/30 hover:bg-accent/5">
-                        <input
-                          accept=".stl,.3mf"
-                          className="sr-only"
-                          type="file"
-                          onChange={(event) =>
-                            setModelFile(event.target.files?.[0] ?? null)
-                          }
-                        />
-                        {modelFile ? "Replace file" : "Choose file"}
-                      </label>
-                      <p className="text-xs leading-5 text-muted-foreground">
-                        Supported formats: `.stl`, `.3mf`
-                      </p>
-                    </div>
-
-                    <div className="rounded-2xl border border-border/70 bg-accent-soft/55 p-4">
-                      <p className="text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground">
-                        File status
-                      </p>
-                      <p className="mt-2 text-sm leading-6 text-foreground">
+                      <p className="mt-1 text-sm text-muted-foreground">
                         {modelFile
-                          ? `${modelFile.name} selected. Next, estimate the cost before sending the request.`
-                          : "No file selected yet. Choose an STL or 3MF file to start the estimate."}
+                          ? "Estimate the cost next. You can send the request after you review the result."
+                          : "Choose a file to unlock the estimate step."}
                       </p>
                     </div>
                   </div>
                 </div>
-              </div>
-            ) : (
-              <div className="rounded-[24px] border border-border/80 bg-white/72 p-4 sm:p-5">
-                <div className="space-y-1">
-                  <p className="text-sm font-medium text-foreground">
-                    Enter slicer values
-                  </p>
-                  <p className="text-sm leading-6 text-muted-foreground">
-                    Use this only if you already have exact print weight and duration
-                    from a slicer or a print profile.
-                  </p>
-                </div>
-              </div>
-            )}
-
-            <div
-              className={cn(
-                "grid gap-4",
-                inputMode === "manual" ? "sm:grid-cols-3" : "sm:grid-cols-1",
-              )}
-            >
-              {inputMode === "manual" ? (
-                <>
+              ) : (
+                <div className="grid gap-4 sm:grid-cols-2">
                   <label className="space-y-2">
-                    <span className="text-sm font-medium text-foreground">
-                      Weight (g)
-                    </span>
+                    <FieldLabel label="Weight (g)" required />
                     <input
                       className="field"
                       inputMode="decimal"
@@ -547,9 +521,7 @@ export function UserRequestForm({
                   </label>
 
                   <label className="space-y-2">
-                    <span className="text-sm font-medium text-foreground">
-                      Duration (min or HH:MM)
-                    </span>
+                    <FieldLabel label="Duration" required />
                     <input
                       className="field"
                       inputMode="numeric"
@@ -563,14 +535,16 @@ export function UserRequestForm({
                       }
                     />
                     <p className="text-xs text-muted-foreground">
-                      You can type `95` or `01:35`.
+                      Type minutes or HH:MM.
                     </p>
                   </label>
-                </>
-              ) : null}
+                </div>
+              )}
+            </div>
 
+            <div className="grid gap-4 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-end">
               <label className="space-y-2">
-                <span className="text-sm font-medium text-foreground">Quantity</span>
+                <FieldLabel label="Quantity" required />
                 <input
                   className="field"
                   inputMode="numeric"
@@ -585,13 +559,38 @@ export function UserRequestForm({
                   }
                 />
               </label>
+
+              <div className="space-y-2 sm:min-w-[220px]">
+                <button
+                  className="inline-flex h-12 w-full items-center justify-center rounded-full bg-foreground px-6 text-sm font-medium text-white transition hover:bg-foreground/90 disabled:cursor-not-allowed disabled:bg-foreground/30"
+                  disabled={
+                    inputMode === "manual"
+                      ? !canCreateManualRequest || Boolean(activeAction)
+                      : !canCreateEstimate || Boolean(activeAction)
+                  }
+                  type="submit"
+                >
+                  {inputMode === "manual"
+                    ? activeAction === "estimate"
+                      ? "Sending request..."
+                      : "Send request"
+                    : activeAction === "estimate"
+                      ? "Estimating..."
+                      : "Estimate cost"}
+                </button>
+                <p className="text-xs text-muted-foreground">
+                  {inputMode === "manual"
+                    ? "Manual values send immediately."
+                    : "Review the estimate before anything is sent."}
+                </p>
+              </div>
             </div>
 
             <label className="space-y-2">
-              <span className="text-sm font-medium text-foreground">Note</span>
+              <FieldLabel label="Note for the print shop" optional />
               <textarea
                 className="field-area"
-                placeholder="Orientation, supports, deadline, or customer notes."
+                placeholder="Orientation, supports, deadline, or anything else we should know."
                 value={form.note}
                 onChange={(event) =>
                   setForm((current) => ({
@@ -602,60 +601,17 @@ export function UserRequestForm({
               />
             </label>
 
-            <RequestMetaRow
-              estimateLabel={
-                inputMode === "manual"
-                  ? manualDurationMinutes
-                    ? formatDuration(manualDurationMinutes)
-                    : "Enter slicer duration"
-                  : modelFile
-                    ? "Ready to estimate"
-                    : "Choose a file"
-              }
-              filamentLabel={
-                selectedFilament ? publicFilamentLabel(selectedFilament) : "Unavailable"
-              }
-              quantity={quantity}
-            />
-
-            {error ? (
-              <ErrorPanel message={error} />
-            ) : null}
-
-            <div className="flex flex-col gap-3 border-t border-border pt-4 sm:flex-row sm:items-center sm:justify-between">
-              <p className="max-w-xl text-sm leading-6 text-muted-foreground">
-                {inputMode === "manual"
-                  ? "Exact slicer values can be sent immediately."
-                  : "The model will only be sent after you review the real slicer estimate."}
-              </p>
-              <button
-                className="inline-flex h-12 items-center justify-center rounded-full bg-foreground px-6 text-sm font-medium text-white transition hover:bg-foreground/90 disabled:cursor-not-allowed disabled:bg-foreground/30"
-                disabled={
-                  inputMode === "manual"
-                    ? !canCreateManualRequest || Boolean(activeAction)
-                    : !canCreateEstimate || Boolean(activeAction)
-                }
-                type="submit"
-              >
-                {inputMode === "manual"
-                  ? activeAction === "estimate"
-                    ? "Sending request..."
-                    : "Send request"
-                  : activeAction === "estimate"
-                    ? "Estimating..."
-                    : "Estimate cost"}
-              </button>
-            </div>
+            {error ? <ErrorPanel message={error} /> : null}
           </>
         ) : (
           <>
             {workflowSteps.length > 0 ? (
-              <WizardStatus
+              <WorkflowHeader
                 currentLabel={
                   isSubmitted
                     ? "Request sent"
                     : isEstimateReadyToSend
-                      ? "Send request"
+                      ? "Review and send"
                       : isEstimateFailed
                         ? "Estimate needs review"
                         : "Estimate running"
@@ -673,7 +629,7 @@ export function UserRequestForm({
 
             <div className="rounded-[28px] border border-border/80 bg-white/72 p-5 sm:p-6">
               <div className="flex items-start justify-between gap-4">
-                <div>
+                <div className="min-w-0">
                   <p className="text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground">
                     {isSubmitted
                       ? "Request sent"
@@ -688,16 +644,16 @@ export function UserRequestForm({
                   </h2>
                   <p className="mt-2 max-w-2xl text-sm leading-6 text-muted-foreground">
                     {isSubmitted
-                      ? "The estimate was reviewed and the request has been sent successfully."
+                      ? "The request was sent successfully."
                       : isEstimateReadyToSend
-                        ? "The slicer estimate is ready. Review the details below, then send the request when you are happy with the cost."
+                        ? "Review the estimate below, then send the request when you are happy with the cost."
                         : isEstimateFailed
                           ? "The estimate could not be completed automatically, so the request has not been sent yet."
-                          : "The model is being processed now. This usually takes a short moment and will refresh automatically."}
+                          : "The model is being processed now and the estimate will refresh automatically."}
                   </p>
                 </div>
                 <button
-                  className="inline-flex h-11 items-center justify-center rounded-full border border-border bg-white px-4 text-sm font-medium text-foreground transition hover:border-accent/30 hover:bg-accent/5"
+                  className="inline-flex h-11 shrink-0 items-center justify-center rounded-full border border-border bg-white px-4 text-sm font-medium text-foreground transition hover:border-accent/30 hover:bg-accent/5"
                   type="button"
                   onClick={resetWorkflow}
                 >
@@ -714,8 +670,7 @@ export function UserRequestForm({
                         Calculating with slicer
                       </p>
                       <p className="text-sm leading-6 text-muted-foreground">
-                        Your file is uploaded and the real slicer estimate is running now.
-                        We will unlock the send button as soon as the price is ready.
+                        Your file is uploaded and the estimate is still running.
                       </p>
                       <p className="text-xs leading-5 text-muted-foreground">
                         {isRefreshingEstimate
@@ -756,24 +711,22 @@ export function UserRequestForm({
               </div>
 
               <div className="mt-4 grid gap-3 sm:grid-cols-2">
-                <div className="rounded-[22px] border border-border/70 bg-background px-4 py-4">
-                  <p className="text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground">
-                    Weight
-                  </p>
-                  <p className="mt-2 text-sm text-foreground">
-                    {confirmation.weightGrams !== null
+                <SummaryTile
+                  icon={<Package2 className="mt-0.5 size-4 text-muted-foreground" />}
+                  label="Filament usage"
+                  value={
+                    confirmation.weightGrams !== null
                       ? formatGrams(confirmation.weightGrams)
                       : isEstimatePending
                         ? "Calculating"
-                        : "Not available"}
-                  </p>
-                </div>
-                <div className="rounded-[22px] border border-border/70 bg-background px-4 py-4">
-                  <p className="text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground">
-                    Status
-                  </p>
-                  <p className="mt-2 text-sm text-foreground">
-                    {isSubmitted
+                        : "Not available"
+                  }
+                />
+                <SummaryTile
+                  icon={<CheckCircle2 className="mt-0.5 size-4 text-muted-foreground" />}
+                  label="Status"
+                  value={
+                    isSubmitted
                       ? `Sent on ${formatDateTime(
                           confirmation.submittedAt ?? confirmation.createdAt,
                         )}`
@@ -781,9 +734,9 @@ export function UserRequestForm({
                         ? "Ready to send"
                         : isEstimateFailed
                           ? "Needs manual review"
-                          : "Slicer is running"}
-                  </p>
-                </div>
+                          : "Slicer is running"
+                  }
+                />
               </div>
 
               {confirmation.note ? (
@@ -840,8 +793,7 @@ export function UserRequestForm({
               {isEstimateReadyToSend ? (
                 <div className="mt-5 flex flex-col gap-3 border-t border-border pt-5 sm:flex-row sm:items-center sm:justify-between">
                   <p className="max-w-xl text-sm leading-6 text-muted-foreground">
-                    This request is still private to you. Send it only if the estimate
-                    looks right.
+                    The estimate is private until you send the request.
                   </p>
                   <button
                     className="inline-flex h-12 items-center justify-center gap-2 rounded-full bg-foreground px-6 text-sm font-medium text-white transition hover:bg-foreground/90 disabled:cursor-not-allowed disabled:bg-foreground/30"
@@ -871,34 +823,14 @@ export function UserRequestForm({
       <div className="flex flex-col gap-4 lg:sticky lg:top-5 lg:self-start">
         <PriceBreakdown
           description={priceDescription}
-          filamentRateLabel={filamentRateLabel}
+          filamentLabel={priceFilamentLabel}
+          filamentPricePerKg={priceFilamentPerKg}
           filamentUsageGrams={filamentUsageGrams}
           machineCost={priceMachineCost}
           materialCost={priceMaterialCost}
           total={priceTotal}
           pendingLabel={pricePendingLabel}
         />
-        {isEstimatePending ? (
-          <div className="surface-muted p-5">
-            <div className="flex items-start gap-3">
-              <Sparkles className="mt-0.5 size-4 text-muted-foreground" />
-              <div>
-                <p className="text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground">
-                  Estimate in progress
-                </p>
-                <p className="mt-2 text-sm leading-6 text-foreground">
-                  We&apos;re processing the model with the selected material. As soon as
-                  the estimate is ready, you can review it and decide whether to send the
-                  request.
-                </p>
-                <p className="mt-3 flex items-center gap-2 text-sm text-muted-foreground">
-                  <LoaderCircle className="size-4 animate-spin" />
-                  Waiting for slicer result
-                </p>
-              </div>
-            </div>
-          </div>
-        ) : null}
         <div className="surface-muted p-5">
           <p className="text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground">
             Current machine rate
@@ -910,8 +842,7 @@ export function UserRequestForm({
             </span>
           </p>
           <p className="mt-3 text-sm leading-6 text-muted-foreground">
-            Material and machine time are combined into one estimate before a request is
-            sent.
+            Machine time is billed from the slicer estimate.
           </p>
         </div>
       </div>
@@ -930,11 +861,11 @@ function buildWorkflowSteps(input: {
   if (input.inputMode === "manual") {
     return [
       {
-        label: "Slicer values entered",
+        label: "Details",
         status: "done",
       },
       {
-        label: "Request sent",
+        label: "Send",
         status: "done",
       },
     ];
@@ -942,76 +873,93 @@ function buildWorkflowSteps(input: {
 
   if (input.confirmation.submissionState === "submitted") {
     return [
-      { label: "Details added", status: "done" },
-      { label: "Estimate reviewed", status: "done" },
-      { label: "Request sent", status: "done" },
+      { label: "Details", status: "done" },
+      { label: "Estimate", status: "done" },
+      { label: "Send", status: "done" },
     ];
   }
 
   if (input.confirmation.estimateState === "ready") {
     return [
-      { label: "Details added", status: "done" },
-      { label: "Estimate ready", status: "done" },
-      { label: "Send request", status: "current" },
+      { label: "Details", status: "done" },
+      { label: "Estimate", status: "done" },
+      { label: "Send", status: "current" },
     ];
   }
 
   if (input.confirmation.estimateState === "failed") {
     return [
-      { label: "Details added", status: "done" },
-      { label: "Estimate needs review", status: "current" },
-      { label: "Send request", status: "upcoming" },
+      { label: "Details", status: "done" },
+      { label: "Estimate", status: "current" },
+      { label: "Send", status: "upcoming" },
     ];
   }
 
   return [
-    { label: "Details added", status: "done" },
-    { label: "Estimate running", status: "current" },
-    { label: "Send request", status: "upcoming" },
+    { label: "Details", status: "done" },
+    { label: "Estimate", status: "current" },
+    { label: "Send", status: "upcoming" },
   ];
 }
 
-function WizardStatus(props: {
+function FieldLabel(props: { label: string; required?: boolean; optional?: boolean }) {
+  return (
+    <span className="inline-flex items-center gap-1.5 text-sm font-medium text-foreground">
+      <span>{props.label}</span>
+      {props.required ? <span className="text-accent">*</span> : null}
+      {props.optional ? (
+        <span className="text-xs font-medium text-muted-foreground">optional</span>
+      ) : null}
+    </span>
+  );
+}
+
+function WorkflowHeader(props: {
   headline: string;
   currentLabel: string;
   steps: WorkflowStep[];
 }) {
   return (
-    <div className="rounded-[24px] border border-border/80 bg-white/78 px-4 py-4 sm:px-5">
-      <div className="flex flex-col gap-1 border-b border-border/70 pb-3 sm:flex-row sm:items-center sm:justify-between">
+    <div className="rounded-[24px] border border-border/80 bg-white/72 px-4 py-4 sm:px-5">
+      <div className="flex flex-wrap items-center justify-between gap-2">
         <p className="text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground">
           {props.headline}
         </p>
         <p className="text-sm text-foreground">{props.currentLabel}</p>
       </div>
-      <div className="mt-4 grid gap-3 sm:grid-cols-3">
+      <ol className="mt-4 flex flex-wrap items-center gap-3">
         {props.steps.map((step, index) => (
-          <div key={step.label} className="flex items-center gap-3">
-            <span
-              className={cn(
-                "inline-flex size-7 shrink-0 items-center justify-center rounded-full border text-xs font-semibold transition",
-                step.status === "done"
-                  ? "border-foreground bg-foreground text-white"
-                  : step.status === "current"
-                    ? "border-foreground/25 bg-accent-soft text-foreground"
-                    : "border-border bg-background text-muted-foreground",
-              )}
-            >
-              {index + 1}
-            </span>
-            <div className="min-w-0">
-              <p className="text-sm font-medium text-foreground">{step.label}</p>
-              <p className="text-xs text-muted-foreground">
-                {step.status === "done"
-                  ? "Done"
-                  : step.status === "current"
-                    ? "In progress"
-                    : "Next"}
-              </p>
+          <li key={step.label} className="flex items-center gap-3">
+            <div className="flex items-center gap-2">
+              <span
+                className={cn(
+                  "inline-flex size-7 shrink-0 items-center justify-center rounded-full border text-xs font-semibold transition",
+                  step.status === "done"
+                    ? "border-foreground bg-foreground text-white"
+                    : step.status === "current"
+                      ? "border-accent/35 bg-accent-soft text-foreground"
+                      : "border-border bg-background text-muted-foreground",
+                )}
+              >
+                {index + 1}
+              </span>
+              <span
+                className={cn(
+                  "text-sm",
+                  step.status === "upcoming"
+                    ? "text-muted-foreground"
+                    : "font-medium text-foreground",
+                )}
+              >
+                {step.label}
+              </span>
             </div>
-          </div>
+            {index < props.steps.length - 1 ? (
+              <span className="hidden h-px w-6 bg-border sm:block" />
+            ) : null}
+          </li>
         ))}
-      </div>
+      </ol>
     </div>
   );
 }
@@ -1025,51 +973,11 @@ function SummaryTile(props: {
     <div className="rounded-[22px] border border-border/70 bg-background px-4 py-4">
       <div className="flex items-start gap-3">
         {props.icon}
-        <div>
+        <div className="min-w-0">
           <p className="text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground">
             {props.label}
           </p>
           <p className="mt-1 text-sm text-foreground">{props.value}</p>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function RequestMetaRow(props: {
-  filamentLabel: string;
-  estimateLabel: string;
-  quantity: number;
-}) {
-  return (
-    <div className="grid gap-3 rounded-[24px] border border-border/80 bg-white/72 p-4 sm:grid-cols-3">
-      <div className="flex items-start gap-3">
-        <Package2 className="mt-0.5 size-4 text-muted-foreground" />
-        <div>
-          <p className="text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground">
-            Filament
-          </p>
-          <p className="mt-1 text-sm text-foreground">{props.filamentLabel}</p>
-        </div>
-      </div>
-      <div className="flex items-start gap-3">
-        <Clock3 className="mt-0.5 size-4 text-muted-foreground" />
-        <div>
-          <p className="text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground">
-            Estimate
-          </p>
-          <p className="mt-1 text-sm text-foreground">{props.estimateLabel}</p>
-        </div>
-      </div>
-      <div className="flex items-start gap-3">
-        <CheckCircle2 className="mt-0.5 size-4 text-muted-foreground" />
-        <div>
-          <p className="text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground">
-            Quantity
-          </p>
-          <p className="mt-1 text-sm text-foreground">
-            {props.quantity > 0 ? props.quantity : "Set a quantity"}
-          </p>
         </div>
       </div>
     </div>
