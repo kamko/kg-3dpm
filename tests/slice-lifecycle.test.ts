@@ -76,7 +76,7 @@ describe("slice-backed task lifecycle", () => {
     expect(readyTask?.estimatedPrice).toBeGreaterThan(0);
   });
 
-  it("submits a ready estimate and keeps drafts out of the admin task list", () => {
+  it("shows draft estimates in the admin task list and keeps them after submit", () => {
     const artifact = createUploadedArtifact({
       storageKey: "uploads/review-part.stl",
       originalName: "review-part.stl",
@@ -93,7 +93,7 @@ describe("slice-backed task lifecycle", () => {
       note: "Send after estimate",
     });
 
-    expect(getAllTasks().some((task) => task.id === created.task!.id)).toBe(false);
+    expect(getAllTasks().some((task) => task.id === created.task!.id)).toBe(true);
 
     reportSliceJobSucceeded({
       id: created.queuePayload!.sliceJobId,

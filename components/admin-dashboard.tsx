@@ -19,6 +19,7 @@ import {
   type EstimateState,
   type Filament,
   type Settings,
+  type SubmissionState,
   type Task,
   type TaskStatus,
 } from "@/lib/types";
@@ -566,6 +567,7 @@ export function AdminDashboard({
             <thead>
               <tr>
                 <th>Request</th>
+                <th>Request state</th>
                 <th>Filament</th>
                 <th>Qty</th>
                 <th>Weight</th>
@@ -1064,6 +1066,9 @@ function TaskRow({
           </p>
         </div>
       </td>
+      <td className="w-[150px]">
+        <SubmissionBadge submissionState={task.submissionState} />
+      </td>
       <td className="min-w-[200px]">
         <select
           className="table-select"
@@ -1392,6 +1397,25 @@ function EstimateBadge({
       title={estimateError ?? undefined}
     >
       {label}
+    </span>
+  );
+}
+
+function SubmissionBadge({
+  submissionState,
+}: {
+  submissionState: SubmissionState;
+}) {
+  return (
+    <span
+      className={cn(
+        "inline-flex h-8 items-center rounded-full border px-3 text-xs font-semibold uppercase tracking-[0.14em]",
+        submissionState === "submitted"
+          ? "border-emerald-200 bg-success-soft text-foreground"
+          : "border-zinc-200 bg-zinc-100 text-foreground",
+      )}
+    >
+      {submissionState === "submitted" ? "Submitted" : "Draft"}
     </span>
   );
 }

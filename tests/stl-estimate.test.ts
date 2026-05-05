@@ -4,6 +4,7 @@ import {
   buildAsciiStl,
   extractBambu3mfSliceMetadata,
   extractTrianglesFrom3mfBuffer,
+  isBambuProject3mfBuffer,
 } from "../lib/model-geometry";
 import { analyze3mfBuffer, analyzeStlBuffer } from "../lib/stl-estimate";
 
@@ -240,5 +241,24 @@ describe("analyze3mfBuffer", () => {
       durationMinutes: 138,
       weightGrams: 109.45,
     });
+  });
+
+  it("detects unsliced Bambu project 3MF files", async () => {
+    const zip = new JSZip();
+    zip.file(
+      "Metadata/slice_info.config",
+      `<?xml version="1.0" encoding="UTF-8"?>
+      <config>
+        <header>
+          <header_item key="X-BBL-Client-Type" value="slicer"/>
+        </header>
+      </config>`,
+    );
+    zip.file("Metadata/project_settings.config", "<config />");
+
+    const buffer = await zip.generateAsync({ type: "arraybuffer" });
+
+    await expect(extractBambu3mfSliceMetadata(buffer)).resolves.toBeNull();
+    await expect(isBambuProject3mfBuffer(buffer)).resolves.toBe(true);
   });
 });

@@ -164,7 +164,7 @@ export function getAllTasks() {
   const db = getDb();
   const rows = db
     .prepare(
-      `${taskSelectQuery} WHERE tasks.submission_state = 'submitted' ORDER BY datetime(COALESCE(tasks.submitted_at, tasks.created_at)) DESC, tasks.id DESC`,
+      `${taskSelectQuery} ORDER BY datetime(COALESCE(tasks.submitted_at, tasks.created_at)) DESC, tasks.id DESC`,
     )
     .all() as TaskRow[];
   return rows.map(mapTask);

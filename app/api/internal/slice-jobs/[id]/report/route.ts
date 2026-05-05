@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { ZodError } from "zod";
 import { getSliceWorkerSecret } from "@/lib/env";
 import {
   reportSliceJobFailed,
@@ -50,11 +51,33 @@ export async function POST(
 
     return NextResponse.json({ task });
   } catch (error) {
+    const message =
+      error instanceof ZodError
+        ? formatSliceReportValidationError(error)
+        : error instanceof Error
+          ? error.message
+          : "Unable to process slice report.";
+
     return NextResponse.json(
-      {
-        error: error instanceof Error ? error.message : "Unable to process slice report.",
-      },
+      { error: message },
       { status: 400 },
     );
   }
+}
+
+function formatSliceReportValidationError(error: ZodError) {
+  const firstIssue = error.issues[0];
+  if (!firstIssue) {
+    return "Invalid slice result from worker.";
+  }
+
+  if (firstIssue.path.includes("weightGrams")) {
+    return "Slicer result did not include a valid filament usage value.";
+  }
+
+  if (firstIssue.path.includes("durationMinutes")) {
+    return "Slicer result did not include a valid print time value.";
+  }
+
+  return "Invalid slice result from worker.";
 }

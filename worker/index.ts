@@ -36,8 +36,21 @@ async function report(
   );
 
   if (!response.ok) {
-    const text = await response.text();
-    throw new Error(`Unable to report slice job state: ${text}`);
+    let message = "Unable to report slice job state.";
+
+    try {
+      const data = (await response.json()) as { error?: string };
+      if (data.error) {
+        message = data.error;
+      }
+    } catch {
+      const text = await response.text();
+      if (text.trim()) {
+        message = text.trim();
+      }
+    }
+
+    throw new Error(message);
   }
 }
 

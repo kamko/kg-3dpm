@@ -112,6 +112,22 @@ export async function extractBambu3mfSliceMetadata(buffer: ArrayBuffer) {
   };
 }
 
+export async function isBambuProject3mfBuffer(buffer: ArrayBuffer) {
+  const zip = await JSZip.loadAsync(buffer);
+
+  if (zip.file("Metadata/project_settings.config")) {
+    return true;
+  }
+
+  const sliceInfo = zip.file("Metadata/slice_info.config");
+  if (!sliceInfo) {
+    return false;
+  }
+
+  const xml = await sliceInfo.async("string");
+  return /X-BBL-Client-Type/i.test(xml) || /X-BBL-Client-Version/i.test(xml);
+}
+
 export function buildAsciiStl(triangles: Triangle[], solidName = "model") {
   const lines = [`solid ${solidName}`];
 

@@ -7,6 +7,7 @@ import {
   buildAsciiStl,
   extractBambu3mfSliceMetadata,
   extractTrianglesFrom3mfBuffer,
+  isBambuProject3mfBuffer,
 } from "@/lib/model-geometry";
 import {
   getPrusaConfigPath,
@@ -63,11 +64,12 @@ export class PrusaSlicerEngine implements SlicerEngine {
       }
 
       const sourceBuffer = await fs.readFile(primarySource.path);
+      const arrayBuffer = sourceBuffer.buffer.slice(
+        sourceBuffer.byteOffset,
+        sourceBuffer.byteOffset + sourceBuffer.byteLength,
+      ) as ArrayBuffer;
       const embeddedMetadata = await extractBambu3mfSliceMetadata(
-        sourceBuffer.buffer.slice(
-          sourceBuffer.byteOffset,
-          sourceBuffer.byteOffset + sourceBuffer.byteLength,
-        ) as ArrayBuffer,
+        arrayBuffer,
       );
 
       if (embeddedMetadata) {
@@ -79,7 +81,15 @@ export class PrusaSlicerEngine implements SlicerEngine {
         } satisfies SliceEngineResult;
       }
 
+      const isBambuProject = await isBambuProject3mfBuffer(arrayBuffer);
+
       try {
+        if (isBambuProject) {
+          throw new Error(
+            "Bambu project 3MF does not include embedded slice values, converting to STL for fallback slicing.",
+          );
+        }
+
         const result = await execFileAsync(
           binary,
           ["--export-gcode", "--output", outputPath, primarySource.path],
@@ -91,6 +101,7 @@ export class PrusaSlicerEngine implements SlicerEngine {
         );
         stdout = result.stdout;
         stderr = result.stderr;
+        ensureValidSliceMetrics(parsePrusaGcodeMetadata(await fs.readFile(outputPath, "utf8")));
       } catch (error) {
         const fallbackPath = await convert3mfToStl(primarySource.path, input.workDir);
         const result = await execFileAsync(
@@ -141,6 +152,7 @@ export class PrusaSlicerEngine implements SlicerEngine {
 
     const gcode = await fs.readFile(outputPath, "utf8");
     const metadata = parsePrusaGcodeMetadata(gcode);
+    ensureValidSliceMetrics(metadata);
     const logText = [stdout, stderr].filter(Boolean).join("\n").trim();
 
     return {
@@ -155,6 +167,19 @@ export class PrusaSlicerEngine implements SlicerEngine {
       ],
       logText,
     } satisfies SliceEngineResult;
+  }
+}
+
+function ensureValidSliceMetrics(metadata: {
+  weightGrams: number;
+  durationMinutes: number;
+}) {
+  if (!Number.isFinite(metadata.weightGrams) || metadata.weightGrams <= 0) {
+    throw new Error("Slicer result did not include a valid filament usage value.");
+  }
+
+  if (!Number.isFinite(metadata.durationMinutes) || metadata.durationMinutes <= 0) {
+    throw new Error("Slicer result did not include a valid print time value.");
   }
 }
 
