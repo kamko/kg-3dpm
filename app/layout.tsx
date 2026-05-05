@@ -14,11 +14,9 @@ const geistMono = Geist_Mono({
 
 export const metadata: Metadata = {
   title: {
-    default: "kg-3dpm",
-    template: "%s | kg-3dpm",
+    default: "3DPM",
+    template: "%s | 3DPM",
   },
-  description:
-    "Premium-feeling internal tool for 3D print job estimates and task management.",
 };
 
 export default function RootLayout({
