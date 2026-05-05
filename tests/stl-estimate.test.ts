@@ -4,6 +4,7 @@ import {
   buildAsciiStl,
   extractBambu3mfProjectInfo,
   extractBambu3mfSliceMetadata,
+  extractBambu3mfSliceMetadataForPlate,
   extractTrianglesFrom3mfBuffer,
   isBambuProject3mfBuffer,
 } from "../lib/model-geometry";
@@ -244,6 +245,35 @@ describe("analyze3mfBuffer", () => {
     });
   });
 
+  it("reads embedded Bambu slice metadata for a selected plate", async () => {
+    const zip = new JSZip();
+    zip.file(
+      "Metadata/slice_info.config",
+      `<?xml version="1.0" encoding="UTF-8"?>
+      <config>
+        <plate>
+          <metadata key="index" value="1"/>
+          <metadata key="prediction" value="8282"/>
+          <metadata key="weight" value="109.45"/>
+          <object identify_id="1" name="Base" skipped="false" />
+        </plate>
+        <plate>
+          <metadata key="index" value="2"/>
+          <metadata key="prediction" value="3600"/>
+          <metadata key="weight" value="55.5"/>
+          <object identify_id="2" name="Inserts" skipped="false" />
+        </plate>
+      </config>`,
+    );
+
+    const buffer = await zip.generateAsync({ type: "arraybuffer" });
+    await expect(extractBambu3mfSliceMetadata(buffer)).resolves.toBeNull();
+    await expect(extractBambu3mfSliceMetadataForPlate(buffer, 1)).resolves.toEqual({
+      durationMinutes: 60,
+      weightGrams: 55.5,
+    });
+  });
+
   it("detects unsliced Bambu project 3MF files", async () => {
     const zip = new JSZip();
     zip.file(
@@ -283,6 +313,43 @@ describe("analyze3mfBuffer", () => {
     await expect(extractBambu3mfProjectInfo(buffer)).resolves.toEqual({
       plateCount: 2,
       plateNames: ["Base", "Inserts"],
+      plates: [
+        { index: 0, name: "Base", objectIds: [] },
+        { index: 1, name: "Inserts", objectIds: [] },
+      ],
+    });
+  });
+
+  it("falls back to slice_info plate names when project plate blocks are absent", async () => {
+    const zip = new JSZip();
+    zip.file("Metadata/project_settings.config", "{}");
+    zip.file(
+      "Metadata/slice_info.config",
+      `<?xml version="1.0" encoding="UTF-8"?>
+      <config>
+        <plate>
+          <metadata key="index" value="1"/>
+          <metadata key="prediction" value="100"/>
+          <metadata key="weight" value="10"/>
+          <object identify_id="1" name="Base" skipped="false" />
+        </plate>
+        <plate>
+          <metadata key="index" value="2"/>
+          <metadata key="prediction" value="200"/>
+          <metadata key="weight" value="20"/>
+          <object identify_id="2" name="Inserts" skipped="false" />
+        </plate>
+      </config>`,
+    );
+
+    const buffer = await zip.generateAsync({ type: "arraybuffer" });
+    await expect(extractBambu3mfProjectInfo(buffer)).resolves.toEqual({
+      plateCount: 2,
+      plateNames: ["Base", "Inserts"],
+      plates: [
+        { index: 0, name: "Base", objectIds: [] },
+        { index: 1, name: "Inserts", objectIds: [] },
+      ],
     });
   });
 });

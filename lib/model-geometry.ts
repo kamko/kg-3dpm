@@ -56,6 +56,13 @@ const unitScaleMap: Record<string, number> = {
 };
 
 export async function extractTrianglesFrom3mfBuffer(buffer: ArrayBuffer) {
+  return extractTrianglesFrom3mfBufferForObjects(buffer);
+}
+
+export async function extractTrianglesFrom3mfBufferForObjects(
+  buffer: ArrayBuffer,
+  objectIds?: string[],
+) {
   const zip = await JSZip.loadAsync(buffer);
   const modelEntries = Object.values(zip.files).filter(
     (entry) => !entry.dir && /(^|\/).+\.model$/i.test(entry.name),
@@ -69,7 +76,7 @@ export async function extractTrianglesFrom3mfBuffer(buffer: ArrayBuffer) {
 
   for (const entry of modelEntries) {
     const xml = await entry.async("string");
-    for (const triangle of parse3mfModelTriangles(xml)) {
+    for (const triangle of parse3mfModelTriangles(xml, objectIds)) {
       triangles.push(triangle);
     }
   }
@@ -82,35 +89,34 @@ export async function extractTrianglesFrom3mfBuffer(buffer: ArrayBuffer) {
 }
 
 export async function extractBambu3mfSliceMetadata(buffer: ArrayBuffer) {
+  return extractBambu3mfSliceMetadataForPlate(buffer, null);
+}
+
+export async function extractBambu3mfSliceMetadataForPlate(
+  buffer: ArrayBuffer,
+  selectedPlateIndex: number | null,
+) {
   const zip = await JSZip.loadAsync(buffer);
-  const sliceInfo = zip.file("Metadata/slice_info.config");
+  const plates = await extractBambuSliceInfoPlates(zip);
 
-  if (!sliceInfo) {
+  if (plates.length === 0) {
     return null;
   }
 
-  const xml = await sliceInfo.async("string");
-  const prediction = xml.match(/\bkey="prediction"\s+value="([^"]+)"/)?.[1];
-  const weight = xml.match(/\bkey="weight"\s+value="([^"]+)"/)?.[1];
+  const plate =
+    selectedPlateIndex === null
+      ? plates.length === 1
+        ? plates[0]
+        : null
+      : plates[selectedPlateIndex] ?? null;
 
-  if (!prediction || !weight) {
-    return null;
-  }
-
-  const durationSeconds = Number(prediction);
-  const weightGrams = Number(weight);
-
-  if (!Number.isFinite(durationSeconds) || durationSeconds <= 0) {
-    return null;
-  }
-
-  if (!Number.isFinite(weightGrams) || weightGrams <= 0) {
+  if (!plate || plate.prediction === null || plate.weight === null) {
     return null;
   }
 
   return {
-    durationMinutes: Math.max(1, Math.round(durationSeconds / 60)),
-    weightGrams: Math.round(weightGrams * 100) / 100,
+    durationMinutes: Math.max(1, Math.round(plate.prediction / 60)),
+    weightGrams: Math.round(plate.weight * 100) / 100,
   };
 }
 
@@ -133,24 +139,74 @@ export async function isBambuProject3mfBuffer(buffer: ArrayBuffer) {
 export async function extractBambu3mfProjectInfo(buffer: ArrayBuffer) {
   const zip = await JSZip.loadAsync(buffer);
   const projectSettings = zip.file("Metadata/project_settings.config");
+  let plates: Array<{ index: number; name: string; objectIds: string[] }> = [];
 
-  if (!projectSettings) {
-    return null;
+  if (projectSettings) {
+    const xml = await projectSettings.async("string");
+    const plateBlocks = [...xml.matchAll(/<plate>([\s\S]*?)<\/plate>/g)];
+    plates = plateBlocks.map((match, index) => {
+      const plateXml = match[1];
+      const name =
+        plateXml.match(/\bkey="plater_name"\s+value="([^"]+)"/)?.[1]?.trim() ||
+        `Plate ${index + 1}`;
+      const objectIds = [...plateXml.matchAll(/\bkey="object_id"\s+value="([^"]+)"/g)].map(
+        (item) => item[1],
+      );
+
+      return {
+        index,
+        name,
+        objectIds,
+      };
+    });
   }
 
-  const xml = await projectSettings.async("string");
-  const plateBlocks = [...xml.matchAll(/<plate>([\s\S]*?)<\/plate>/g)];
-  const plateNames = plateBlocks.map((match) => {
-    return (
-      match[1].match(/\bkey="plater_name"\s+value="([^"]+)"/)?.[1]?.trim() ||
-      "Unnamed plate"
-    );
-  });
+  if (plates.length === 0) {
+    const sliceInfoPlates = await extractBambuSliceInfoPlates(zip);
+    plates = sliceInfoPlates.map((plate) => ({
+      index: plate.index,
+      name: plate.name,
+      objectIds: [],
+    }));
+  }
 
   return {
-    plateCount: plateBlocks.length,
-    plateNames,
+    plateCount: plates.length,
+    plateNames: plates.map((plate) => plate.name),
+    plates,
   };
+}
+
+async function extractBambuSliceInfoPlates(zip: JSZip) {
+  const sliceInfo = zip.file("Metadata/slice_info.config");
+  if (!sliceInfo) {
+    return [];
+  }
+
+  const xml = await sliceInfo.async("string");
+  const plateBlocks = [...xml.matchAll(/<plate>([\s\S]*?)<\/plate>/g)];
+
+  return plateBlocks.map((match, index) => {
+    const plateXml = match[1];
+    const displayIndex = plateXml.match(/\bkey="index"\s+value="([^"]+)"/)?.[1];
+    const predictionRaw = plateXml.match(/\bkey="prediction"\s+value="([^"]+)"/)?.[1];
+    const weightRaw = plateXml.match(/\bkey="weight"\s+value="([^"]+)"/)?.[1];
+    const objectName =
+      plateXml.match(/<object\b[^>]*\bname="([^"]+)"/)?.[1]?.trim() || null;
+    const prediction = predictionRaw ? Number(predictionRaw) : null;
+    const weight = weightRaw ? Number(weightRaw) : null;
+
+    return {
+      index,
+      name: objectName || `Plate ${displayIndex ?? index + 1}`,
+      prediction:
+        prediction !== null && Number.isFinite(prediction) && prediction > 0
+          ? prediction
+          : null,
+      weight:
+        weight !== null && Number.isFinite(weight) && weight > 0 ? weight : null,
+    };
+  });
 }
 
 export function buildAsciiStl(triangles: Triangle[], solidName = "model") {
@@ -173,11 +229,12 @@ export function buildAsciiStl(triangles: Triangle[], solidName = "model") {
   return lines.join("\n");
 }
 
-function parse3mfModelTriangles(xml: string) {
+function parse3mfModelTriangles(xml: string, selectedObjectIds?: string[]) {
   const unit = xml.match(/<model\b[^>]*\bunit="([^"]+)"/i)?.[1]?.toLowerCase();
   const scale = unit ? (unitScaleMap[unit] ?? 1) : 1;
   const objectMatches = [...xml.matchAll(/<object\b[\s\S]*?<\/object>/g)];
   const objectMap = new Map<string, ObjectDefinition>();
+  const allowedObjectIds = selectedObjectIds ? new Set(selectedObjectIds) : null;
 
   for (const objectMatch of objectMatches) {
     const objectXml = objectMatch[0];
@@ -216,6 +273,9 @@ function parse3mfModelTriangles(xml: string) {
       if (!objectId) {
         continue;
       }
+      if (allowedObjectIds && !allowedObjectIds.has(objectId)) {
+        continue;
+      }
 
       const resolved = resolveObjectTriangles(
         objectId,
@@ -228,7 +288,11 @@ function parse3mfModelTriangles(xml: string) {
       }
     }
   } else {
-    for (const objectId of objectMap.keys()) {
+    const objectIds = allowedObjectIds
+      ? [...allowedObjectIds].filter((objectId) => objectMap.has(objectId))
+      : [...objectMap.keys()];
+
+    for (const objectId of objectIds) {
       const resolved = resolveObjectTriangles(
         objectId,
         objectMap,

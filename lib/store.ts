@@ -30,6 +30,8 @@ type TaskRow = {
   id: number;
   nameOrLink: string;
   sourceUrl: string | null;
+  selectedPlateIndex: number | null;
+  selectedPlateName: string | null;
   filamentId: number;
   quantity: number;
   weightGrams: number | null;
@@ -97,6 +99,8 @@ const taskSelectQuery = `
     tasks.id,
     tasks.name_or_link AS nameOrLink,
     tasks.source_url AS sourceUrl,
+    tasks.selected_plate_index AS selectedPlateIndex,
+    tasks.selected_plate_name AS selectedPlateName,
     tasks.filament_id AS filamentId,
     tasks.quantity,
     tasks.weight_grams AS weightGrams,
@@ -207,6 +211,8 @@ export function createTask(
       mode: "upload";
       name?: string;
       sourceUrl?: string;
+      selectedPlateIndex?: number;
+      selectedPlateName?: string;
       filamentId: number;
       quantity: number;
       sourceArtifactIds: number[];
@@ -259,6 +265,8 @@ export function createTask(
           INSERT INTO tasks (
             name_or_link,
             source_url,
+            selected_plate_index,
+            selected_plate_name,
             filament_id,
             quantity,
             weight_grams,
@@ -273,10 +281,18 @@ export function createTask(
             estimate_error,
             note
           )
-          VALUES (?, ?, ?, ?, NULL, NULL, NULL, NULL, 'new', 'draft', NULL, 'pending', 'prusa', NULL, ?)
+          VALUES (?, ?, ?, ?, ?, ?, NULL, NULL, NULL, NULL, 'new', 'draft', NULL, 'pending', 'prusa', NULL, ?)
         `,
       )
-      .run(displayName, input.sourceUrl ?? null, input.filamentId, input.quantity, input.note);
+      .run(
+        displayName,
+        input.sourceUrl ?? null,
+        input.selectedPlateIndex ?? null,
+        input.selectedPlateName ?? null,
+        input.filamentId,
+        input.quantity,
+        input.note,
+      );
 
     const taskId = Number(taskResult.lastInsertRowid);
 
@@ -313,6 +329,8 @@ export function createTask(
     queuePayload: {
       sliceJobId: transaction.sliceJobId,
       taskId: transaction.taskId,
+      selectedPlateIndex: input.selectedPlateIndex ?? null,
+      selectedPlateName: input.selectedPlateName ?? null,
       sourceArtifacts: sourceArtifacts.map((artifact) => ({
         id: artifact.id,
         storageKey: artifact.storageKey,
@@ -867,6 +885,8 @@ export function retrySliceJob(id: number) {
     queuePayload: {
       sliceJobId: id,
       taskId: task.id,
+      selectedPlateIndex: task.selectedPlateIndex,
+      selectedPlateName: task.selectedPlateName,
       sourceArtifacts: sourceArtifacts.map((artifact) => ({
         id: artifact.id,
         storageKey: artifact.storageKey,
@@ -967,6 +987,8 @@ function mapTask(row: TaskRow): Task {
     id: row.id,
     nameOrLink: row.nameOrLink,
     sourceUrl: row.sourceUrl,
+    selectedPlateIndex: row.selectedPlateIndex,
+    selectedPlateName: row.selectedPlateName,
     filamentId: row.filamentId,
     quantity: row.quantity,
     weightGrams: row.weightGrams,

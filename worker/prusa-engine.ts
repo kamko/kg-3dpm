@@ -6,8 +6,8 @@ import { getSliceJobTimeoutMs } from "@/lib/env";
 import {
   buildAsciiStl,
   extractBambu3mfProjectInfo,
-  extractBambu3mfSliceMetadata,
-  extractTrianglesFrom3mfBuffer,
+  extractBambu3mfSliceMetadataForPlate,
+  extractTrianglesFrom3mfBufferForObjects,
   isBambuProject3mfBuffer,
 } from "@/lib/model-geometry";
 import {
@@ -35,6 +35,7 @@ export interface SlicerEngine {
       originalName: string;
     }>;
     presetKey: string;
+    selectedPlateIndex?: number | null;
     workDir: string;
   }): Promise<SliceEngineResult>;
 }
@@ -46,6 +47,7 @@ export class PrusaSlicerEngine implements SlicerEngine {
       originalName: string;
     }>;
     presetKey: string;
+    selectedPlateIndex?: number | null;
     workDir: string;
   }) {
     if (input.sourceFiles.length === 0) {
@@ -72,20 +74,36 @@ export class PrusaSlicerEngine implements SlicerEngine {
       const projectInfo = await extractBambu3mfProjectInfo(arrayBuffer);
 
       if (projectInfo && projectInfo.plateCount > 1) {
-        const plateSummary = projectInfo.plateNames.join(", ");
-        throw new Error(
-          `This 3MF contains multiple plates (${plateSummary}). Export one plate or upload separate STL files instead.`,
-        );
+        if (
+          input.selectedPlateIndex === null ||
+          input.selectedPlateIndex === undefined
+        ) {
+          const plateSummary = projectInfo.plateNames.join(", ");
+          throw new Error(
+            `This 3MF contains multiple plates (${plateSummary}). Choose one plate before estimating.`,
+          );
+        }
+
+        const selectedPlate = projectInfo.plates[input.selectedPlateIndex];
+        if (!selectedPlate) {
+          throw new Error("Selected plate could not be found in the uploaded 3MF.");
+        }
       }
 
-      const embeddedMetadata = await extractBambu3mfSliceMetadata(arrayBuffer);
+      const embeddedMetadata = await extractBambu3mfSliceMetadataForPlate(
+        arrayBuffer,
+        input.selectedPlateIndex ?? null,
+      );
 
       if (embeddedMetadata) {
         return {
           weightGrams: embeddedMetadata.weightGrams,
           durationMinutes: embeddedMetadata.durationMinutes,
           generatedFiles: [],
-          logText: "Using embedded 3MF slice metadata from the uploaded project.",
+          logText:
+            input.selectedPlateIndex === null || input.selectedPlateIndex === undefined
+              ? "Using embedded 3MF slice metadata from the uploaded project."
+              : "Using embedded 3MF slice metadata from the selected plate.",
         } satisfies SliceEngineResult;
       }
 
@@ -119,7 +137,11 @@ export class PrusaSlicerEngine implements SlicerEngine {
         const metadata = parsePrusaGcodeMetadata(await fs.readFile(outputPath, "utf8"));
         ensureValidSliceMetrics(metadata);
       } catch (error) {
-        const fallbackPath = await convert3mfToStl(primarySource.path, input.workDir);
+        const fallbackPath = await convert3mfToStl(
+          primarySource.path,
+          input.workDir,
+          input.selectedPlateIndex ?? null,
+        );
         const result = await execFileAsync(
           binary,
           [
@@ -186,13 +208,27 @@ export class PrusaSlicerEngine implements SlicerEngine {
   }
 }
 
-async function convert3mfToStl(sourcePath: string, workDir: string) {
+async function convert3mfToStl(
+  sourcePath: string,
+  workDir: string,
+  selectedPlateIndex: number | null,
+) {
   const buffer = await fs.readFile(sourcePath);
-  const triangles = await extractTrianglesFrom3mfBuffer(
-    buffer.buffer.slice(
-      buffer.byteOffset,
-      buffer.byteOffset + buffer.byteLength,
-    ) as ArrayBuffer,
+  const arrayBuffer = buffer.buffer.slice(
+    buffer.byteOffset,
+    buffer.byteOffset + buffer.byteLength,
+  ) as ArrayBuffer;
+  const projectInfo = await extractBambu3mfProjectInfo(arrayBuffer);
+  const selectedObjectIds =
+    projectInfo &&
+    selectedPlateIndex !== null &&
+    selectedPlateIndex !== undefined &&
+    projectInfo.plates[selectedPlateIndex]
+      ? projectInfo.plates[selectedPlateIndex]!.objectIds
+      : undefined;
+  const triangles = await extractTrianglesFrom3mfBufferForObjects(
+    arrayBuffer,
+    selectedObjectIds,
   );
   const fallbackPath = path.join(workDir, "flattened-from-3mf.stl");
   await fs.writeFile(

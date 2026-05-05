@@ -72,6 +72,8 @@ export type Task = {
   id: number;
   nameOrLink: string;
   sourceUrl: string | null;
+  selectedPlateIndex: number | null;
+  selectedPlateName: string | null;
   filamentId: number;
   quantity: number;
   weightGrams: number | null;
@@ -107,6 +109,8 @@ export type CreateTaskPayload =
     mode: "upload";
     name?: string;
     sourceUrl?: string;
+    selectedPlateIndex?: number;
+    selectedPlateName?: string;
     filamentId: number;
     quantity: number;
     sourceArtifactIds: number[];
@@ -116,6 +120,8 @@ export type CreateTaskPayload =
 export type SliceQueuePayload = {
   sliceJobId: number;
   taskId: number;
+  selectedPlateIndex: number | null;
+  selectedPlateName: string | null;
   sourceArtifacts: Array<
     Pick<Artifact, "id" | "storageKey" | "originalName" | "contentType" | "sizeBytes">
   >;

@@ -203,4 +203,30 @@ describe("slice-backed task lifecycle", () => {
       artifactB.id,
     ]);
   });
+
+  it("stores selected plate information on draft tasks", () => {
+    const artifact = createUploadedArtifact({
+      storageKey: "uploads/multi-plate.3mf",
+      originalName: "multi-plate.3mf",
+      contentType: "model/3mf",
+      sizeBytes: 4096,
+    });
+
+    const created = createTask({
+      mode: "upload",
+      name: "Plate choice part",
+      sourceUrl: undefined,
+      selectedPlateIndex: 1,
+      selectedPlateName: "Inserts",
+      filamentId: 1,
+      quantity: 1,
+      sourceArtifactIds: [artifact.id],
+      note: "",
+    });
+
+    expect(created.task?.selectedPlateIndex).toBe(1);
+    expect(created.task?.selectedPlateName).toBe("Inserts");
+    expect(created.queuePayload.selectedPlateIndex).toBe(1);
+    expect(created.queuePayload.selectedPlateName).toBe("Inserts");
+  });
 });

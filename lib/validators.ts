@@ -21,6 +21,8 @@ export const createTaskSchema = z.discriminatedUnion("mode", [
   z.object({
     mode: z.literal("upload"),
     ...baseTaskSchema,
+    selectedPlateIndex: z.coerce.number().int().min(0).optional(),
+    selectedPlateName: z.string().trim().min(1).max(120).optional(),
     sourceArtifactIds: z
       .array(z.coerce.number().int().positive())
       .min(1, "At least one model file is required."),

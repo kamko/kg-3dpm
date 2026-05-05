@@ -85,6 +85,12 @@ function migrateTasksTable(db: Database.Database) {
   );
   const hasAcceptedAt = columns.some((column) => column.name === "accepted_at");
   const hasSourceUrl = columns.some((column) => column.name === "source_url");
+  const hasSelectedPlateIndex = columns.some(
+    (column) => column.name === "selected_plate_index",
+  );
+  const hasSelectedPlateName = columns.some(
+    (column) => column.name === "selected_plate_name",
+  );
   const filamentRefs = db
     .prepare("PRAGMA foreign_key_list(tasks)")
     .all() as Array<{ table: string }>;
@@ -97,6 +103,8 @@ function migrateTasksTable(db: Database.Database) {
     hasSubmissionState &&
     hasAcceptedAt &&
     hasSourceUrl &&
+    hasSelectedPlateIndex &&
+    hasSelectedPlateName &&
     !hasLegacyFilamentRef
   ) {
     return;
@@ -109,6 +117,8 @@ function migrateTasksTable(db: Database.Database) {
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       name_or_link TEXT NOT NULL,
       source_url TEXT,
+      selected_plate_index INTEGER,
+      selected_plate_name TEXT,
       filament_id INTEGER NOT NULL REFERENCES filaments(id),
       quantity INTEGER NOT NULL CHECK (quantity > 0),
       weight_grams REAL CHECK (weight_grams IS NULL OR weight_grams > 0),
@@ -138,6 +148,8 @@ function migrateTasksTable(db: Database.Database) {
       id,
       name_or_link,
       source_url,
+      selected_plate_index,
+      selected_plate_name,
       filament_id,
       quantity,
       weight_grams,
@@ -158,6 +170,8 @@ function migrateTasksTable(db: Database.Database) {
       id,
       name_or_link,
       ${hasSourceUrl ? "source_url" : "NULL"},
+      ${hasSelectedPlateIndex ? "selected_plate_index" : "NULL"},
+      ${hasSelectedPlateName ? "selected_plate_name" : "NULL"},
       filament_id,
       quantity,
       weight_grams,

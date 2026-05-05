@@ -3,6 +3,7 @@
 import { AlertCircle, LoaderCircle, Send } from "lucide-react";
 import { useEffect, useState } from "react";
 import { PriceBreakdown } from "@/components/price-breakdown";
+import { extractBambu3mfProjectInfo } from "@/lib/model-geometry";
 import { calculatePricing } from "@/lib/pricing";
 import type { Artifact, Filament, Task } from "@/lib/types";
 import { formatCurrency, formatDateTime, publicFilamentLabel } from "@/lib/utils";
@@ -20,6 +21,11 @@ type FormState = {
   note: string;
 };
 
+type PlateOption = {
+  index: number;
+  name: string;
+};
+
 const initialFormState = (filamentId?: number): FormState => ({
   modelName: "",
   sourceUrl: "",
@@ -34,6 +40,8 @@ export function UserRequestForm({
 }: UserRequestFormProps) {
   const [form, setForm] = useState<FormState>(initialFormState(filaments[0]?.id));
   const [modelFiles, setModelFiles] = useState<File[]>([]);
+  const [plateOptions, setPlateOptions] = useState<PlateOption[]>([]);
+  const [selectedPlateIndex, setSelectedPlateIndex] = useState<string>("");
   const [confirmation, setConfirmation] = useState<Task | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [activeAction, setActiveAction] = useState<"estimate" | "send" | null>(
@@ -84,13 +92,17 @@ export function UserRequestForm({
     !confirmation &&
     Boolean(selectedFilament) &&
     quantity > 0 &&
-    modelFiles.length > 0;
+    modelFiles.length > 0 &&
+    (plateOptions.length <= 1 || selectedPlateIndex !== "");
   const hasMixedModelSelection =
     modelFiles.length > 1 &&
     modelFiles.some((file) => !file.name.toLowerCase().endsWith(".stl"));
   const selectionError = hasMixedModelSelection
     ? "Multiple-file upload is supported for STL files only."
     : null;
+  const selectedPlateName =
+    plateOptions.find((plate) => String(plate.index) === selectedPlateIndex)?.name ??
+    null;
 
   const priceDescription = confirmation
     ? isEstimatePending
@@ -176,6 +188,8 @@ export function UserRequestForm({
     setConfirmation(null);
     setError(null);
     setModelFiles([]);
+    setPlateOptions([]);
+    setSelectedPlateIndex("");
     setIsRefreshingEstimate(false);
     setActiveAction(null);
     setForm(initialFormState(selectedFilament?.id ?? filaments[0]?.id));
@@ -236,6 +250,9 @@ export function UserRequestForm({
           mode: "upload",
           name: form.modelName,
           sourceUrl: form.sourceUrl,
+          selectedPlateIndex:
+            selectedPlateIndex === "" ? undefined : Number(selectedPlateIndex),
+          selectedPlateName: selectedPlateName ?? undefined,
           filamentId: selectedFilament.id,
           sourceArtifactIds: artifacts.map((artifact) => artifact.id),
           quantity,
@@ -400,7 +417,38 @@ export function UserRequestForm({
                   disabled={Boolean(confirmation)}
                   type="file"
                   multiple
-                  onChange={(event) => setModelFiles(Array.from(event.target.files ?? []))}
+                  onChange={(event) => {
+                    void (async () => {
+                      const files = Array.from(event.target.files ?? []);
+                      setModelFiles(files);
+                      setPlateOptions([]);
+                      setSelectedPlateIndex("");
+
+                      if (files.length !== 1 || !files[0]?.name.toLowerCase().endsWith(".3mf")) {
+                        return;
+                      }
+
+                      try {
+                        const projectInfo = await extractBambu3mfProjectInfo(
+                          await files[0].arrayBuffer(),
+                        );
+                        if (!projectInfo || projectInfo.plateCount <= 1) {
+                          return;
+                        }
+
+                        const options = projectInfo.plates.map((plate) => ({
+                          index: plate.index,
+                          name: plate.name,
+                        }));
+                        setPlateOptions(options);
+                        if (options.length === 1 && options[0]) {
+                          setSelectedPlateIndex(String(options[0].index));
+                        }
+                      } catch {
+                        setPlateOptions([]);
+                      }
+                    })();
+                  }}
                 />
                 {confirmation
                   ? "Files locked"
@@ -421,6 +469,28 @@ export function UserRequestForm({
                   ))}
                 </ul>
               </div>
+            ) : null}
+
+            {plateOptions.length > 1 ? (
+              <label className="mt-4 block space-y-2">
+                <FieldLabel label="Plate" required />
+                <select
+                  className="field"
+                  disabled={Boolean(confirmation)}
+                  value={selectedPlateIndex}
+                  onChange={(event) => setSelectedPlateIndex(event.target.value)}
+                >
+                  <option value="">Choose a plate</option>
+                  {plateOptions.map((plate) => (
+                    <option key={plate.index} value={plate.index}>
+                      {plate.name}
+                    </option>
+                  ))}
+                </select>
+                <p className="text-xs text-muted-foreground">
+                  This 3MF contains multiple build plates. Pick the plate you want priced.
+                </p>
+              </label>
             ) : null}
           </div>
         </div>

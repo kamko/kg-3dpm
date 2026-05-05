@@ -1328,6 +1328,8 @@ function buildOptimisticTask(params: {
     id: currentTask?.id ?? 0,
     nameOrLink: params.draft.nameOrLink.trim(),
     sourceUrl: params.draft.sourceUrl.trim() || null,
+    selectedPlateIndex: currentTask?.selectedPlateIndex ?? null,
+    selectedPlateName: currentTask?.selectedPlateName ?? null,
     filamentId: params.filament.id,
     quantity: Number(params.draft.quantity),
     weightGrams: params.weightGrams,

@@ -13,6 +13,8 @@ export async function POST(request: Request) {
         mode: "upload",
         name: payload.name,
         sourceUrl: payload.sourceUrl,
+        selectedPlateIndex: payload.selectedPlateIndex,
+        selectedPlateName: payload.selectedPlateName,
         filamentId: payload.filamentId,
         quantity: payload.quantity,
         sourceArtifactIds: payload.sourceArtifactIds,

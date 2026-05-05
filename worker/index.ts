@@ -75,6 +75,7 @@ async function processJob(job: SliceQueuePayload) {
     const result = await engine.slice({
       sourceFiles,
       presetKey: job.presetKey,
+      selectedPlateIndex: job.selectedPlateIndex,
       workDir,
     });
 
