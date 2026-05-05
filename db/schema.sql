@@ -16,6 +16,7 @@ CREATE TABLE IF NOT EXISTS settings (
 CREATE TABLE IF NOT EXISTS tasks (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   name_or_link TEXT NOT NULL,
+  source_url TEXT,
   filament_id INTEGER NOT NULL REFERENCES filaments(id),
   quantity INTEGER NOT NULL CHECK (quantity > 0),
   weight_grams REAL CHECK (weight_grams IS NULL OR weight_grams > 0),

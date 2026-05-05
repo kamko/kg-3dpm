@@ -53,6 +53,7 @@ export async function PATCH(
 
     const task = updateTask(taskId, {
       nameOrLink: payload.nameOrLink,
+      sourceUrl: payload.sourceUrl,
       filamentId: payload.filamentId,
       quantity: payload.quantity,
       weightGrams: payload.weightGrams,

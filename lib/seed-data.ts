@@ -45,6 +45,7 @@ const FILAMENTS = [
 
 const TASKS: Array<{
   nameOrLink: string;
+  sourceUrl?: string;
   filamentIndex: number;
   quantity: number;
   weightGrams: number;
@@ -189,6 +190,7 @@ export function seedDatabase(
     const insertTask = db.prepare(`
       INSERT INTO tasks (
         name_or_link,
+        source_url,
         filament_id,
         quantity,
         weight_grams,
@@ -206,6 +208,7 @@ export function seedDatabase(
       )
       VALUES (
         @nameOrLink,
+        @sourceUrl,
         @filamentId,
         @quantity,
         @weightGrams,
@@ -236,6 +239,7 @@ export function seedDatabase(
 
       insertTask.run({
         nameOrLink: task.nameOrLink,
+        sourceUrl: task.sourceUrl ?? null,
         filamentId: filament.id,
         quantity: task.quantity,
         weightGrams: task.weightGrams,

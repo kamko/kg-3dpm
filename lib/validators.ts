@@ -6,7 +6,12 @@ import {
 } from "@/lib/types";
 
 const baseTaskSchema = {
-  nameOrLink: z.string().trim().min(1, "Name or link is required."),
+  name: z.string().trim().max(200).optional().default(""),
+  sourceUrl: z
+    .preprocess(
+      (value) => (value === "" || value === undefined || value === null ? undefined : value),
+      z.string().trim().url("Reference link must be a valid URL.").optional(),
+    ),
   filamentId: z.coerce.number().int().positive(),
   quantity: z.coerce.number().int().positive(),
   note: z.string().trim().max(2000).optional().default(""),
@@ -14,20 +19,20 @@ const baseTaskSchema = {
 
 export const createTaskSchema = z.discriminatedUnion("mode", [
   z.object({
-    mode: z.literal("manual"),
-    ...baseTaskSchema,
-    weightGrams: z.coerce.number().positive(),
-    durationInput: z.string().trim().min(1, "Duration is required."),
-  }),
-  z.object({
     mode: z.literal("upload"),
     ...baseTaskSchema,
-    sourceArtifactId: z.coerce.number().int().positive(),
+    sourceArtifactIds: z
+      .array(z.coerce.number().int().positive())
+      .min(1, "At least one model file is required."),
   }),
 ]);
 
 export const updateTaskSchema = z.object({
   nameOrLink: z.string().trim().min(1).optional(),
+  sourceUrl: z.preprocess(
+    (value) => (value === "" || value === undefined ? null : value),
+    z.string().trim().url("Reference link must be a valid URL.").nullable(),
+  ).optional(),
   filamentId: z.coerce.number().int().positive().optional(),
   quantity: z.coerce.number().int().positive().optional(),
   weightGrams: z

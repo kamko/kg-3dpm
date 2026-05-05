@@ -45,7 +45,7 @@ describe("slice-backed task lifecycle", () => {
       nameOrLink: "Test part",
       filamentId: 1,
       quantity: 2,
-      sourceArtifactId: artifact.id,
+      sourceArtifactIds: [artifact.id],
       note: "Queued through worker",
     });
 
@@ -89,7 +89,7 @@ describe("slice-backed task lifecycle", () => {
       nameOrLink: "Review part",
       filamentId: 1,
       quantity: 1,
-      sourceArtifactId: artifact.id,
+      sourceArtifactIds: [artifact.id],
       note: "Send after estimate",
     });
 
@@ -109,17 +109,31 @@ describe("slice-backed task lifecycle", () => {
   });
 
   it("accepts a submitted request and freezes its quote against later price changes", () => {
+    const artifact = createUploadedArtifact({
+      storageKey: "uploads/locked-quote.stl",
+      originalName: "locked-quote.stl",
+      contentType: "model/stl",
+      sizeBytes: 2048,
+    });
+
     const created = createTask({
-      mode: "manual",
+      mode: "upload",
       nameOrLink: "Locked quote part",
       filamentId: 1,
       quantity: 1,
-      weightGrams: 80,
-      durationMinutes: 60,
+      sourceArtifactIds: [artifact.id],
       note: "",
     });
 
-    const beforeAccept = created.task!;
+    reportSliceJobSucceeded({
+      id: created.queuePayload!.sliceJobId,
+      weightGrams: 80,
+      durationMinutes: 60,
+      artifacts: [],
+    });
+
+    const submitted = submitTask(created.task!.id)!;
+    const beforeAccept = submitted;
     const accepted = acceptTask(beforeAccept.id);
 
     expect(accepted?.acceptedAt).not.toBeNull();
@@ -145,7 +159,7 @@ describe("slice-backed task lifecycle", () => {
       nameOrLink: "Failure part",
       filamentId: 1,
       quantity: 1,
-      sourceArtifactId: artifact.id,
+      sourceArtifactIds: [artifact.id],
       note: "",
     });
 
@@ -158,5 +172,35 @@ describe("slice-backed task lifecycle", () => {
     const retried = retrySliceJob(created.queuePayload!.sliceJobId);
     expect(retried.task?.estimateState).toBe("pending");
     expect(retried.queuePayload.sliceJobId).toBe(created.queuePayload!.sliceJobId);
+  });
+
+  it("queues multiple STL files together as one estimate", () => {
+    const artifactA = createUploadedArtifact({
+      storageKey: "uploads/multi-a.stl",
+      originalName: "multi-a.stl",
+      contentType: "model/stl",
+      sizeBytes: 1024,
+    });
+    const artifactB = createUploadedArtifact({
+      storageKey: "uploads/multi-b.stl",
+      originalName: "multi-b.stl",
+      contentType: "model/stl",
+      sizeBytes: 1024,
+    });
+
+    const created = createTask({
+      mode: "upload",
+      nameOrLink: "Multi STL part",
+      filamentId: 1,
+      quantity: 1,
+      sourceArtifactIds: [artifactA.id, artifactB.id],
+      note: "",
+    });
+
+    expect(created.queuePayload.sourceArtifacts).toHaveLength(2);
+    expect(created.queuePayload.sourceArtifacts.map((artifact) => artifact.id)).toEqual([
+      artifactA.id,
+      artifactB.id,
+    ]);
   });
 });

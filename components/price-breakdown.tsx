@@ -1,5 +1,6 @@
 "use client";
 
+import type { ReactNode } from "react";
 import { formatCurrency, formatGrams } from "@/lib/utils";
 
 type PriceBreakdownProps = {
@@ -11,6 +12,7 @@ type PriceBreakdownProps = {
   total: number | null;
   pendingLabel?: string | null;
   description?: string;
+  totalAction?: ReactNode;
 };
 
 function valueOrPending(value: number | null, pendingLabel: string | null | undefined) {
@@ -30,6 +32,7 @@ export function PriceBreakdown({
   total,
   pendingLabel,
   description,
+  totalAction,
 }: PriceBreakdownProps) {
   return (
     <div className="surface flex flex-col gap-5 p-5 sm:p-6">
@@ -82,18 +85,22 @@ export function PriceBreakdown({
           </dd>
         </div>
         <div className="rounded-2xl border border-accent/14 bg-accent-soft px-4 py-4">
-          <div className="flex items-end justify-between gap-4">
-            <div>
-              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-muted-foreground">
-                Estimated total
-              </p>
-              <p className="mt-1 text-3xl font-semibold tracking-[-0.04em] text-foreground">
-                {valueOrPending(total, pendingLabel)}
+          <div className="flex flex-col gap-4">
+            <div className="flex items-end justify-between gap-4">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-[0.18em] text-muted-foreground">
+                  Estimated total
+                </p>
+                <p className="mt-1 text-3xl font-semibold tracking-[-0.04em] text-foreground">
+                  {valueOrPending(total, pendingLabel)}
+                </p>
+              </div>
+              <p className="max-w-[11rem] text-right text-xs leading-5 text-muted-foreground">
+                Quantity is already included once the slicer result is ready.
               </p>
             </div>
-            <p className="max-w-[11rem] text-right text-xs leading-5 text-muted-foreground">
-              Quantity is already included once the slicer result is ready.
-            </p>
+
+            {totalAction ? <div>{totalAction}</div> : null}
           </div>
         </div>
       </dl>

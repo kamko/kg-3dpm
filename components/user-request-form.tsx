@@ -1,27 +1,11 @@
 "use client";
 
-import {
-  AlertCircle,
-  CheckCircle2,
-  Clock3,
-  FileUp,
-  LoaderCircle,
-  Package2,
-  Send,
-} from "lucide-react";
-import type { ReactNode } from "react";
+import { AlertCircle, LoaderCircle, Send } from "lucide-react";
 import { useEffect, useState } from "react";
 import { PriceBreakdown } from "@/components/price-breakdown";
-import { calculatePricing, parseDurationInput } from "@/lib/pricing";
+import { calculatePricing } from "@/lib/pricing";
 import type { Artifact, Filament, Task } from "@/lib/types";
-import {
-  cn,
-  formatCurrency,
-  formatDateTime,
-  formatDuration,
-  formatGrams,
-  publicFilamentLabel,
-} from "@/lib/utils";
+import { formatCurrency, formatDateTime, publicFilamentLabel } from "@/lib/utils";
 
 type UserRequestFormProps = {
   filaments: Filament[];
@@ -29,24 +13,17 @@ type UserRequestFormProps = {
 };
 
 type FormState = {
-  nameOrLink: string;
+  modelName: string;
+  sourceUrl: string;
   filamentId: string;
-  weightGrams: string;
-  durationInput: string;
   quantity: string;
   note: string;
 };
 
-type WorkflowStep = {
-  label: string;
-  status: "done" | "current" | "upcoming";
-};
-
 const initialFormState = (filamentId?: number): FormState => ({
-  nameOrLink: "",
+  modelName: "",
+  sourceUrl: "",
   filamentId: filamentId ? String(filamentId) : "",
-  weightGrams: "",
-  durationInput: "",
   quantity: "1",
   note: "",
 });
@@ -56,8 +33,7 @@ export function UserRequestForm({
   machineHourPrice,
 }: UserRequestFormProps) {
   const [form, setForm] = useState<FormState>(initialFormState(filaments[0]?.id));
-  const [inputMode, setInputMode] = useState<"upload" | "manual">("upload");
-  const [modelFile, setModelFile] = useState<File | null>(null);
+  const [modelFiles, setModelFiles] = useState<File[]>([]);
   const [confirmation, setConfirmation] = useState<Task | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [activeAction, setActiveAction] = useState<"estimate" | "send" | null>(
@@ -69,26 +45,6 @@ export function UserRequestForm({
     filaments.find((filament) => filament.id === Number(form.filamentId)) ??
     filaments[0];
   const quantity = Number(form.quantity);
-  const manualWeightGrams = Number(form.weightGrams);
-  const manualDurationMinutes = parseDurationInput(form.durationInput);
-
-  const manualBreakdown =
-    selectedFilament &&
-    inputMode === "manual" &&
-    Number.isFinite(quantity) &&
-    quantity > 0 &&
-    Number.isFinite(manualWeightGrams) &&
-    manualWeightGrams > 0 &&
-    manualDurationMinutes !== null &&
-    manualDurationMinutes > 0
-      ? calculatePricing({
-          weightGrams: manualWeightGrams,
-          durationMinutes: manualDurationMinutes,
-          quantity,
-          pricePerKg: selectedFilament.pricePerKg,
-          machineHourPrice,
-        })
-      : null;
 
   const confirmedFilament = confirmation
     ? filaments.find((filament) => filament.id === confirmation.filamentId) ?? null
@@ -124,21 +80,14 @@ export function UserRequestForm({
   const canCreateEstimate =
     !confirmation &&
     Boolean(selectedFilament) &&
-    form.nameOrLink.trim().length > 0 &&
     quantity > 0 &&
-    Boolean(modelFile);
-
-  const canCreateManualRequest =
-    !confirmation &&
-    Boolean(selectedFilament) &&
-    form.nameOrLink.trim().length > 0 &&
-    quantity > 0 &&
-    Boolean(
-      manualBreakdown &&
-        manualDurationMinutes &&
-        Number.isFinite(manualWeightGrams) &&
-        manualWeightGrams > 0,
-    );
+    modelFiles.length > 0;
+  const hasMixedModelSelection =
+    modelFiles.length > 1 &&
+    modelFiles.some((file) => !file.name.toLowerCase().endsWith(".stl"));
+  const selectionError = hasMixedModelSelection
+    ? "Multiple-file upload is supported for STL files only."
+    : null;
 
   const priceDescription = confirmation
     ? isEstimatePending
@@ -148,9 +97,7 @@ export function UserRequestForm({
         : isSubmitted
           ? "This is the estimate that was sent with the request."
           : "Review the estimate, then send the request when it looks right."
-    : inputMode === "manual"
-      ? "Manual slicer values price instantly."
-      : "Choose a model file to run a real slicer estimate.";
+    : "Choose a model file to run a real slicer estimate.";
 
   const pricePendingLabel = confirmation
     ? isEstimatePending
@@ -158,37 +105,29 @@ export function UserRequestForm({
       : isEstimateFailed
         ? "Needs review"
         : null
-    : inputMode === "upload"
-      ? "Estimate first"
-      : null;
+    : "Estimate first";
 
   const activeFilamentForPricing = confirmedFilament ?? selectedFilament ?? null;
   const priceFilamentLabel = activeFilamentForPricing
     ? publicFilamentLabel(activeFilamentForPricing)
     : null;
   const priceFilamentPerKg = activeFilamentForPricing?.pricePerKg ?? null;
-  const filamentUsageGrams = confirmation
-    ? confirmation.weightGrams
-    : inputMode === "manual" &&
-        Number.isFinite(manualWeightGrams) &&
-        manualWeightGrams > 0
-      ? manualWeightGrams
-      : null;
-
   const priceMaterialCost = confirmation
     ? confirmedBreakdown?.materialCost ?? null
-    : manualBreakdown?.materialCost ?? null;
+    : null;
   const priceMachineCost = confirmation
     ? confirmedBreakdown?.machineCost ?? null
-    : manualBreakdown?.machineCost ?? null;
+    : null;
   const priceTotal = confirmation
     ? confirmedBreakdown?.estimatedPrice ?? confirmation.estimatedPrice ?? null
-    : manualBreakdown?.estimatedPrice ?? null;
+    : null;
 
-  const workflowSteps = buildWorkflowSteps({
-    inputMode,
-    confirmation,
-  });
+  const fileLabel =
+    modelFiles.length === 0
+      ? "No file selected"
+      : modelFiles.length === 1
+        ? modelFiles[0]?.name ?? "1 file"
+        : `${modelFiles.length} STL files`;
 
   useEffect(() => {
     if (!confirmation || confirmation.submissionState !== "draft") {
@@ -233,10 +172,9 @@ export function UserRequestForm({
   const resetWorkflow = () => {
     setConfirmation(null);
     setError(null);
-    setModelFile(null);
+    setModelFiles([]);
     setIsRefreshingEstimate(false);
     setActiveAction(null);
-    setInputMode("upload");
     setForm(initialFormState(selectedFilament?.id ?? filaments[0]?.id));
   };
 
@@ -249,22 +187,22 @@ export function UserRequestForm({
       return;
     }
 
-    if (inputMode === "manual") {
-      if (!canCreateManualRequest) {
-        setError("Enter valid slicer values to continue.");
-        return;
-      }
-    } else if (!canCreateEstimate) {
+    if (!canCreateEstimate) {
       setError("Upload an STL or 3MF file to continue.");
+      return;
+    }
+
+    if (hasMixedModelSelection) {
+      setError(selectionError);
       return;
     }
 
     setActiveAction("estimate");
 
     try {
-      let artifact: Artifact | null = null;
+      const artifacts: Artifact[] = [];
 
-      if (inputMode === "upload" && modelFile) {
+      for (const modelFile of modelFiles) {
         const uploadBody = new FormData();
         uploadBody.set("file", modelFile);
 
@@ -283,7 +221,7 @@ export function UserRequestForm({
           return;
         }
 
-        artifact = uploadData.artifact;
+        artifacts.push(uploadData.artifact);
       }
 
       const response = await fetch("/api/tasks", {
@@ -291,26 +229,15 @@ export function UserRequestForm({
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify(
-          inputMode === "manual"
-            ? {
-                mode: "manual",
-                nameOrLink: form.nameOrLink,
-                filamentId: selectedFilament.id,
-                weightGrams: manualWeightGrams,
-                durationInput: form.durationInput,
-                quantity,
-                note: form.note,
-              }
-            : {
-                mode: "upload",
-                nameOrLink: form.nameOrLink,
-                filamentId: selectedFilament.id,
-                sourceArtifactId: artifact?.id,
-                quantity,
-                note: form.note,
-              },
-        ),
+        body: JSON.stringify({
+          mode: "upload",
+          name: form.modelName,
+          sourceUrl: form.sourceUrl,
+          filamentId: selectedFilament.id,
+          sourceArtifactIds: artifacts.map((artifact) => artifact.id),
+          quantity,
+          note: form.note,
+        }),
       });
 
       const data = (await response.json()) as {
@@ -324,9 +251,13 @@ export function UserRequestForm({
       }
 
       setConfirmation(data.task);
-      if (inputMode === "manual") {
-        setModelFile(null);
-      }
+      setForm({
+        modelName: data.task.nameOrLink,
+        sourceUrl: data.task.sourceUrl ?? "",
+        filamentId: String(data.task.filamentId),
+        quantity: String(data.task.quantity),
+        note: data.task.note,
+      });
     } finally {
       setActiveAction(null);
     }
@@ -361,463 +292,316 @@ export function UserRequestForm({
     }
   };
 
-  const initialSteps: WorkflowStep[] =
-    inputMode === "manual"
-      ? [
-          { label: "Details", status: "done" },
-          { label: "Send", status: "current" },
-        ]
-      : [
-          { label: "Details", status: "current" },
-          { label: "Estimate", status: "upcoming" },
-          { label: "Send", status: "upcoming" },
-        ];
+  const saveDraftDetails = async (nextForm = form) => {
+    if (!confirmation || confirmation.submissionState !== "draft") {
+      return;
+    }
+
+    try {
+      const response = await fetch(`/api/tasks/${confirmation.id}`, {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          nameOrLink: nextForm.modelName.trim() || confirmation.nameOrLink,
+          sourceUrl: nextForm.sourceUrl.trim() || null,
+          note: nextForm.note,
+        }),
+      });
+
+      const data = (await response.json()) as {
+        error?: string;
+        task?: Task;
+      };
+
+      if (!response.ok || !data.task) {
+        throw new Error(data.error ?? "Unable to save request details.");
+      }
+
+      setConfirmation(data.task);
+      setForm((current) => ({
+        ...current,
+        modelName: data.task?.nameOrLink ?? current.modelName,
+        sourceUrl: data.task?.sourceUrl ?? "",
+        note: data.task?.note ?? current.note,
+      }));
+      setError(null);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Unable to save request details.");
+    }
+  };
 
   return (
     <section className="grid gap-6 lg:grid-cols-[minmax(0,1.2fr)_360px]">
-      <form
-        className="surface flex flex-col gap-6 p-5 sm:p-7"
-        onSubmit={handleEstimateSubmit}
-      >
-        {!confirmation ? (
-          <>
-            <WorkflowHeader
-              currentLabel={inputMode === "manual" ? "Direct request" : "Add details"}
-              headline={inputMode === "manual" ? "2 steps" : "Step 1 of 3"}
-              steps={initialSteps}
+      <form className="surface flex flex-col gap-5 p-5 sm:p-7" onSubmit={handleEstimateSubmit}>
+        <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_220px]">
+          <label className="space-y-2">
+            <FieldLabel label="Filament" required />
+            <select
+              className="field"
+              disabled={Boolean(confirmation)}
+              value={form.filamentId}
+              onChange={(event) =>
+                setForm((current) => ({
+                  ...current,
+                  filamentId: event.target.value,
+                }))
+              }
+            >
+              {filaments.map((filament) => (
+                <option key={filament.id} value={filament.id}>
+                  {publicFilamentLabel(filament)}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <label className="space-y-2">
+            <FieldLabel label="Quantity" required />
+            <input
+              className="field"
+              disabled={Boolean(confirmation)}
+              inputMode="numeric"
+              min="1"
+              placeholder="1"
+              value={form.quantity}
+              onChange={(event) =>
+                setForm((current) => ({
+                  ...current,
+                  quantity: event.target.value,
+                }))
+              }
             />
+          </label>
+        </div>
 
-            <div className="grid gap-4 md:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)]">
-              <label className="space-y-2">
-                <FieldLabel label="Model link or name" required />
-                <input
-                  autoFocus
-                  className="field"
-                  name="nameOrLink"
-                  placeholder="https://... or Ruins Frame"
-                  value={form.nameOrLink}
-                  onChange={(event) =>
-                    setForm((current) => ({
-                      ...current,
-                      nameOrLink: event.target.value,
-                    }))
-                  }
-                />
-              </label>
+        <div className="rounded-[24px] border border-border/80 bg-white/72 p-4">
+          <div className="space-y-1">
+            <FieldLabel label="Model file" required />
+            <p className="text-sm text-muted-foreground">
+              Upload one 3MF, or one or more STL files, to generate the estimate.
+            </p>
+          </div>
 
-              <label className="space-y-2">
-                <FieldLabel label="Filament" required />
-                <select
-                  className="field"
-                  name="filamentId"
-                  value={form.filamentId}
-                  onChange={(event) =>
-                    setForm((current) => ({
-                      ...current,
-                      filamentId: event.target.value,
-                    }))
-                  }
-                >
-                  {filaments.map((filament) => (
-                    <option key={filament.id} value={filament.id}>
-                      {publicFilamentLabel(filament)}
-                    </option>
-                  ))}
-                </select>
-              </label>
-            </div>
-
-            <div className="grid gap-3 rounded-[24px] border border-border/80 bg-white/72 p-4">
-              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                <div className="space-y-1">
-                  <FieldLabel label="Estimate method" required />
-                  <p className="text-sm text-muted-foreground">
-                    {inputMode === "upload"
-                      ? "Upload a model and estimate it first."
-                      : "Use exact slicer values if you already have them."}
-                  </p>
-                </div>
-                <div className="grid grid-cols-2 gap-1.5 rounded-[20px] border border-border bg-background p-1.5">
-                  <button
-                    className={cn(
-                      "min-h-[48px] rounded-[14px] px-4 py-2.5 text-sm font-medium transition",
-                      inputMode === "upload"
-                        ? "bg-foreground text-white"
-                        : "text-muted-foreground hover:text-foreground",
-                    )}
-                    type="button"
-                    onClick={() => setInputMode("upload")}
-                  >
-                    Model file
-                  </button>
-                  <button
-                    className={cn(
-                      "min-h-[48px] rounded-[14px] px-4 py-2.5 text-sm font-medium transition",
-                      inputMode === "manual"
-                        ? "bg-foreground text-white"
-                        : "text-muted-foreground hover:text-foreground",
-                    )}
-                    type="button"
-                    onClick={() => setInputMode("manual")}
-                  >
-                    Slicer values
-                  </button>
-                </div>
+          <div className="mt-4 rounded-[20px] border border-border/70 bg-background px-4 py-4">
+            <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+              <div className="min-w-0 space-y-1">
+                <p className="truncate text-sm font-medium text-foreground">{fileLabel}</p>
+                <p className="text-sm text-muted-foreground">STL or 3MF, up to 100 MB each</p>
               </div>
-
-              {inputMode === "upload" ? (
-                <div className="rounded-[22px] border border-border/70 bg-background px-4 py-4">
-                  <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-                    <div className="space-y-1">
-                      <FieldLabel label="Model file" required />
-                      <p className="text-sm text-muted-foreground">STL or 3MF</p>
-                    </div>
-                    <label className="inline-flex h-11 cursor-pointer items-center justify-center rounded-full border border-border bg-white px-4 text-sm font-medium text-foreground transition hover:border-accent/30 hover:bg-accent/5">
-                      <input
-                        accept=".stl,.3mf"
-                        className="sr-only"
-                        type="file"
-                        onChange={(event) =>
-                          setModelFile(event.target.files?.[0] ?? null)
-                        }
-                      />
-                      {modelFile ? "Replace file" : "Choose file"}
-                    </label>
-                  </div>
-                  <div className="mt-4 flex items-start gap-3 rounded-2xl border border-border/70 bg-white/80 px-4 py-3">
-                    <FileUp className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
-                    <div className="min-w-0">
-                      <p className="text-sm font-medium text-foreground">
-                        {modelFile ? modelFile.name : "No file selected"}
-                      </p>
-                      <p className="mt-1 text-sm text-muted-foreground">
-                        {modelFile
-                          ? "Estimate the cost next. You can send the request after you review the result."
-                          : "Choose a file to unlock the estimate step."}
-                      </p>
-                    </div>
-                  </div>
-                </div>
-              ) : (
-                <div className="grid gap-4 sm:grid-cols-2">
-                  <label className="space-y-2">
-                    <FieldLabel label="Weight (g)" required />
-                    <input
-                      className="field"
-                      inputMode="decimal"
-                      min="1"
-                      placeholder="128"
-                      value={form.weightGrams}
-                      onChange={(event) =>
-                        setForm((current) => ({
-                          ...current,
-                          weightGrams: event.target.value,
-                        }))
-                      }
-                    />
-                    <p className="text-xs text-muted-foreground">
-                      From slicer or print profile.
-                    </p>
-                  </label>
-
-                  <label className="space-y-2">
-                    <FieldLabel label="Duration" required />
-                    <input
-                      className="field"
-                      inputMode="numeric"
-                      placeholder="90 or 01:30"
-                      value={form.durationInput}
-                      onChange={(event) =>
-                        setForm((current) => ({
-                          ...current,
-                          durationInput: event.target.value,
-                        }))
-                      }
-                    />
-                    <p className="text-xs text-muted-foreground">
-                      Type minutes or HH:MM.
-                    </p>
-                  </label>
-                </div>
-              )}
+              <label className="inline-flex h-11 shrink-0 cursor-pointer items-center justify-center rounded-full border border-border bg-white px-4 text-sm font-medium text-foreground transition hover:border-accent/30 hover:bg-accent/5">
+                <input
+                  accept=".stl,.3mf"
+                  className="sr-only"
+                  disabled={Boolean(confirmation)}
+                  type="file"
+                  multiple
+                  onChange={(event) => setModelFiles(Array.from(event.target.files ?? []))}
+                />
+                {confirmation
+                  ? "Files locked"
+                  : modelFiles.length > 0
+                    ? "Replace files"
+                    : "Choose files"}
+              </label>
             </div>
 
-            <div className="grid gap-4 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-end">
-              <label className="space-y-2">
-                <FieldLabel label="Quantity" required />
-                <input
-                  className="field"
-                  inputMode="numeric"
-                  min="1"
-                  placeholder="1"
-                  value={form.quantity}
-                  onChange={(event) =>
-                    setForm((current) => ({
-                      ...current,
-                      quantity: event.target.value,
-                    }))
-                  }
-                />
-              </label>
-
-              <div className="space-y-2 sm:min-w-[220px]">
-                <button
-                  className="inline-flex h-12 w-full items-center justify-center rounded-full bg-foreground px-6 text-sm font-medium text-white transition hover:bg-foreground/90 disabled:cursor-not-allowed disabled:bg-foreground/30"
-                  disabled={
-                    inputMode === "manual"
-                      ? !canCreateManualRequest || Boolean(activeAction)
-                      : !canCreateEstimate || Boolean(activeAction)
-                  }
-                  type="submit"
-                >
-                  {inputMode === "manual"
-                    ? activeAction === "estimate"
-                      ? "Sending request..."
-                      : "Send request"
-                    : activeAction === "estimate"
-                      ? "Estimating..."
-                      : "Estimate cost"}
-                </button>
-                <p className="text-xs text-muted-foreground">
-                  {inputMode === "manual"
-                    ? "Manual values send immediately."
-                    : "Review the estimate before anything is sent."}
+            {modelFiles.length > 1 ? (
+              <div className="mt-4 rounded-2xl border border-border/70 bg-white/82 px-4 py-3">
+                <p className="text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground">
+                  Included files
                 </p>
+                <ul className="mt-2 space-y-1 text-sm text-foreground">
+                  {modelFiles.map((file) => (
+                    <li key={`${file.name}-${file.size}`}>{file.name}</li>
+                  ))}
+                </ul>
               </div>
-            </div>
+            ) : null}
+          </div>
+        </div>
 
+        <div className="rounded-[24px] border border-border/80 bg-white/72 p-4">
+          <div className="space-y-1">
+            <p className="text-sm font-medium text-foreground">Optional details</p>
+          </div>
+
+          <div className="mt-4 grid gap-4 sm:grid-cols-2">
             <label className="space-y-2">
-              <FieldLabel label="Note for the print shop" optional />
-              <textarea
-                className="field-area"
-                placeholder="Orientation, supports, deadline, or anything else we should know."
-                value={form.note}
+              <FieldLabel label="Name" optional />
+              <input
+                className="field"
+                placeholder="Ruins Frame"
+                value={form.modelName}
+                onBlur={() => void saveDraftDetails()}
                 onChange={(event) =>
                   setForm((current) => ({
                     ...current,
-                    note: event.target.value,
+                    modelName: event.target.value,
                   }))
                 }
               />
             </label>
 
-            {error ? <ErrorPanel message={error} /> : null}
-          </>
-        ) : (
-          <>
-            {workflowSteps.length > 0 ? (
-              <WorkflowHeader
-                currentLabel={
-                  isSubmitted
-                    ? "Request sent"
-                    : isEstimateReadyToSend
-                      ? "Review and send"
-                      : isEstimateFailed
-                        ? "Estimate needs review"
-                        : "Estimate running"
+            <label className="space-y-2">
+              <FieldLabel label="Reference link" optional />
+              <input
+                className="field"
+                inputMode="url"
+                placeholder="https://makerworld.com/..."
+                value={form.sourceUrl}
+                onBlur={() => void saveDraftDetails()}
+                onChange={(event) =>
+                  setForm((current) => ({
+                    ...current,
+                    sourceUrl: event.target.value,
+                  }))
                 }
-                headline={
-                  isSubmitted
-                    ? "Completed"
-                    : isEstimateReadyToSend
-                      ? "Step 3 of 3"
-                      : "Step 2 of 3"
-                }
-                steps={workflowSteps}
               />
-            ) : null}
+            </label>
+          </div>
 
-            <div className="rounded-[28px] border border-border/80 bg-white/72 p-5 sm:p-6">
-              <div className="flex items-start justify-between gap-4">
-                <div className="min-w-0">
-                  <p className="text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground">
+          <label className="mt-4 block space-y-2">
+            <FieldLabel label="Note for the print shop" optional />
+            <textarea
+              className="field-area"
+              placeholder="Orientation, supports, deadline, or anything else we should know."
+              value={form.note}
+              onBlur={() => void saveDraftDetails()}
+              onChange={(event) =>
+                setForm((current) => ({
+                  ...current,
+                  note: event.target.value,
+                }))
+              }
+            />
+          </label>
+
+          <div className="mt-4 flex flex-col gap-3 border-t border-border/70 pt-4 sm:flex-row sm:items-center sm:justify-between">
+            <p className="text-xs text-muted-foreground">
+              {confirmation
+                ? "Filament, quantity, and files are locked after estimation starts."
+                : "Review the estimate before anything is sent."}
+            </p>
+
+            {!confirmation ? (
+              <button
+                className="inline-flex h-12 items-center justify-center rounded-full bg-foreground px-6 text-sm font-medium text-white transition hover:bg-foreground/90 disabled:cursor-not-allowed disabled:bg-foreground/30"
+                disabled={!canCreateEstimate || Boolean(activeAction)}
+                type="submit"
+              >
+                {activeAction === "estimate" ? "Estimating..." : "Estimate cost"}
+              </button>
+            ) : null}
+          </div>
+
+          <div className="mt-4 rounded-[20px] border border-border/70 bg-background/82 px-4 py-4">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+              <div className="space-y-2">
+                <div className="flex flex-wrap items-center gap-3">
+                  <StatusPill
+                    tone={
+                      isSubmitted
+                        ? "success"
+                        : isEstimateReadyToSend
+                          ? "success"
+                          : isEstimateFailed
+                            ? "danger"
+                            : confirmation
+                              ? "neutral"
+                              : "neutral"
+                    }
+                  >
                     {isSubmitted
                       ? "Request sent"
                       : isEstimateReadyToSend
                         ? "Estimate ready"
                         : isEstimateFailed
-                          ? "Estimate needs review"
-                          : "Estimating"}
-                  </p>
-                  <h2 className="mt-2 text-2xl font-semibold tracking-[-0.03em] text-foreground">
-                    {confirmation.nameOrLink}
-                  </h2>
-                  <p className="mt-2 max-w-2xl text-sm leading-6 text-muted-foreground">
+                          ? "Needs review"
+                          : confirmation
+                            ? "Estimating"
+                            : "Estimate status"}
+                  </StatusPill>
+                  <p className="text-sm text-muted-foreground">
                     {isSubmitted
-                      ? "The request was sent successfully."
+                      ? "The request is in the print shop queue."
                       : isEstimateReadyToSend
-                        ? "Review the estimate below, then send the request when you are happy with the cost."
+                        ? "Looks good, you can send the request now."
                         : isEstimateFailed
-                          ? "The estimate could not be completed automatically, so the request has not been sent yet."
-                          : "The model is being processed now and the estimate will refresh automatically."}
+                          ? "The estimate needs manual review."
+                          : confirmation
+                            ? isRefreshingEstimate
+                              ? "Refreshing the slicer result..."
+                              : "The slicer is running now."
+                            : "Your estimate will appear here after you click Estimate cost."}
                   </p>
                 </div>
+
+                <div className="grid gap-2 text-sm text-muted-foreground sm:grid-cols-3">
+                  <span>File: {fileLabel}</span>
+                  <span>
+                    Filament:{" "}
+                    {confirmedFilament
+                      ? publicFilamentLabel(confirmedFilament)
+                      : selectedFilament
+                        ? publicFilamentLabel(selectedFilament)
+                        : "Not selected"}
+                  </span>
+                  <span>
+                    Quantity: {confirmation ? confirmation.quantity : quantity || 1}
+                  </span>
+                </div>
+              </div>
+
+              {confirmation ? (
                 <button
-                  className="inline-flex h-11 shrink-0 items-center justify-center rounded-full border border-border bg-white px-4 text-sm font-medium text-foreground transition hover:border-accent/30 hover:bg-accent/5"
+                  className="inline-flex h-9 shrink-0 items-center justify-center rounded-full border border-border bg-white px-4 text-sm font-medium text-foreground transition hover:border-accent/30 hover:bg-accent/5"
                   type="button"
                   onClick={resetWorkflow}
                 >
                   {isSubmitted ? "Create another" : "Start over"}
                 </button>
-              </div>
-
-              {isEstimatePending ? (
-                <div className="mt-5 rounded-[24px] border border-border bg-accent-soft/55 p-5">
-                  <div className="flex items-start gap-3">
-                    <LoaderCircle className="mt-0.5 size-5 animate-spin text-foreground" />
-                    <div className="space-y-2">
-                      <p className="text-sm font-medium text-foreground">
-                        Calculating with slicer
-                      </p>
-                      <p className="text-sm leading-6 text-muted-foreground">
-                        Your file is uploaded and the estimate is still running.
-                      </p>
-                      <p className="text-xs leading-5 text-muted-foreground">
-                        {isRefreshingEstimate
-                          ? "Refreshing the latest estimate..."
-                          : "Waiting for slicer result..."}
-                      </p>
-                    </div>
-                  </div>
-                </div>
-              ) : null}
-
-              <div className="mt-5 grid gap-3 sm:grid-cols-3">
-                <SummaryTile
-                  icon={<Package2 className="mt-0.5 size-4 text-muted-foreground" />}
-                  label="Filament"
-                  value={
-                    confirmedFilament
-                      ? publicFilamentLabel(confirmedFilament)
-                      : confirmation.filamentLabel
-                  }
-                />
-                <SummaryTile
-                  icon={<Clock3 className="mt-0.5 size-4 text-muted-foreground" />}
-                  label="Duration"
-                  value={
-                    confirmation.durationMinutes
-                      ? formatDuration(confirmation.durationMinutes)
-                      : isEstimatePending
-                        ? "Calculating"
-                        : "Not available"
-                  }
-                />
-                <SummaryTile
-                  icon={<CheckCircle2 className="mt-0.5 size-4 text-muted-foreground" />}
-                  label="Quantity"
-                  value={String(confirmation.quantity)}
-                />
-              </div>
-
-              <div className="mt-4 grid gap-3 sm:grid-cols-2">
-                <SummaryTile
-                  icon={<Package2 className="mt-0.5 size-4 text-muted-foreground" />}
-                  label="Filament usage"
-                  value={
-                    confirmation.weightGrams !== null
-                      ? formatGrams(confirmation.weightGrams)
-                      : isEstimatePending
-                        ? "Calculating"
-                        : "Not available"
-                  }
-                />
-                <SummaryTile
-                  icon={<CheckCircle2 className="mt-0.5 size-4 text-muted-foreground" />}
-                  label="Status"
-                  value={
-                    isSubmitted
-                      ? `Sent on ${formatDateTime(
-                          confirmation.submittedAt ?? confirmation.createdAt,
-                        )}`
-                      : isEstimateReadyToSend
-                        ? "Ready to send"
-                        : isEstimateFailed
-                          ? "Needs manual review"
-                          : "Slicer is running"
-                  }
-                />
-              </div>
-
-              {confirmation.note ? (
-                <div className="mt-4 rounded-[22px] border border-border/70 bg-background px-4 py-4">
-                  <p className="text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground">
-                    Note
-                  </p>
-                  <p className="mt-2 text-sm leading-6 text-foreground">
-                    {confirmation.note}
-                  </p>
-                </div>
-              ) : null}
-
-              {isEstimateFailed && confirmation.estimateError ? (
-                <div className="mt-4">
-                  <ErrorPanel message={confirmation.estimateError} />
-                </div>
-              ) : null}
-
-              {isSubmitted ? (
-                <div className="mt-5 rounded-[24px] border border-emerald-200 bg-success-soft p-5">
-                  <p className="text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground">
-                    What happened
-                  </p>
-                  <div className="mt-3 space-y-3 text-sm text-foreground">
-                    <TimelineRow
-                      title="Details received"
-                      description={`Saved on ${formatDateTime(confirmation.createdAt)}.`}
-                    />
-                    <TimelineRow
-                      title={
-                        inputMode === "manual"
-                          ? "Manual slicer values accepted"
-                          : "Slicer estimate completed"
-                      }
-                      description={
-                        confirmation.estimatedPrice !== null
-                          ? `Estimated total ${formatCurrency(
-                              confirmation.estimatedPrice,
-                            )}.`
-                          : "The estimate was captured successfully."
-                      }
-                    />
-                    <TimelineRow
-                      title="Request sent"
-                      description={`Sent on ${formatDateTime(
-                        confirmation.submittedAt ?? confirmation.createdAt,
-                      )}.`}
-                    />
-                  </div>
-                </div>
-              ) : null}
-
-              {isEstimateReadyToSend ? (
-                <div className="mt-5 flex flex-col gap-3 border-t border-border pt-5 sm:flex-row sm:items-center sm:justify-between">
-                  <p className="max-w-xl text-sm leading-6 text-muted-foreground">
-                    The estimate is private until you send the request.
-                  </p>
-                  <button
-                    className="inline-flex h-12 items-center justify-center gap-2 rounded-full bg-foreground px-6 text-sm font-medium text-white transition hover:bg-foreground/90 disabled:cursor-not-allowed disabled:bg-foreground/30"
-                    disabled={isSendingRequest}
-                    type="button"
-                    onClick={handleSendRequest}
-                  >
-                    {isSendingRequest ? (
-                      <>
-                        <LoaderCircle className="size-4 animate-spin" />
-                        Sending request...
-                      </>
-                    ) : (
-                      <>
-                        <Send className="size-4" />
-                        Send request
-                      </>
-                    )}
-                  </button>
-                </div>
               ) : null}
             </div>
-          </>
-        )}
+          </div>
+        </div>
+
+        {confirmation && isEstimateFailed && confirmation.estimateError ? (
+          <ErrorPanel message={confirmation.estimateError} />
+        ) : null}
+        {selectionError ? <ErrorPanel message={selectionError} /> : null}
+        {error && error !== selectionError ? <ErrorPanel message={error} /> : null}
+
+        {confirmation && isSubmitted ? (
+          <div className="rounded-[24px] border border-emerald-200 bg-success-soft p-5">
+            <p className="text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground">
+              What happened
+            </p>
+            <div className="mt-3 space-y-3 text-sm text-foreground">
+              <TimelineRow
+                title="Details received"
+                description={`Saved on ${formatDateTime(confirmation.createdAt)}.`}
+              />
+              <TimelineRow
+                title="Slicer estimate completed"
+                description={
+                  confirmation.estimatedPrice !== null
+                    ? `Estimated total ${formatCurrency(
+                        confirmation.estimatedPrice,
+                      )}.`
+                    : "The estimate was captured successfully."
+                }
+              />
+              <TimelineRow
+                title="Request sent"
+                description={`Sent on ${formatDateTime(
+                  confirmation.submittedAt ?? confirmation.createdAt,
+                )}.`}
+              />
+            </div>
+          </div>
+        ) : null}
       </form>
 
       <div className="flex flex-col gap-4 lg:sticky lg:top-5 lg:self-start">
@@ -825,11 +609,33 @@ export function UserRequestForm({
           description={priceDescription}
           filamentLabel={priceFilamentLabel}
           filamentPricePerKg={priceFilamentPerKg}
-          filamentUsageGrams={filamentUsageGrams}
+          filamentUsageGrams={confirmation?.weightGrams ?? null}
           machineCost={priceMachineCost}
           materialCost={priceMaterialCost}
           total={priceTotal}
           pendingLabel={pricePendingLabel}
+          totalAction={
+            confirmation && !isSubmitted ? (
+              <button
+                className="inline-flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-6 text-sm font-medium text-white transition hover:bg-foreground/90 disabled:cursor-not-allowed disabled:bg-foreground/30"
+                disabled={!isEstimateReadyToSend || isSendingRequest}
+                type="button"
+                onClick={handleSendRequest}
+              >
+                {isSendingRequest ? (
+                  <>
+                    <LoaderCircle className="size-4 animate-spin" />
+                    Sending request...
+                  </>
+                ) : (
+                  <>
+                    <Send className="size-4" />
+                    Send request
+                  </>
+                )}
+              </button>
+            ) : null
+          }
         />
         <div className="surface-muted p-5">
           <p className="text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground">
@@ -850,58 +656,6 @@ export function UserRequestForm({
   );
 }
 
-function buildWorkflowSteps(input: {
-  inputMode: "upload" | "manual";
-  confirmation: Task | null;
-}): WorkflowStep[] {
-  if (!input.confirmation) {
-    return [];
-  }
-
-  if (input.inputMode === "manual") {
-    return [
-      {
-        label: "Details",
-        status: "done",
-      },
-      {
-        label: "Send",
-        status: "done",
-      },
-    ];
-  }
-
-  if (input.confirmation.submissionState === "submitted") {
-    return [
-      { label: "Details", status: "done" },
-      { label: "Estimate", status: "done" },
-      { label: "Send", status: "done" },
-    ];
-  }
-
-  if (input.confirmation.estimateState === "ready") {
-    return [
-      { label: "Details", status: "done" },
-      { label: "Estimate", status: "done" },
-      { label: "Send", status: "current" },
-    ];
-  }
-
-  if (input.confirmation.estimateState === "failed") {
-    return [
-      { label: "Details", status: "done" },
-      { label: "Estimate", status: "current" },
-      { label: "Send", status: "upcoming" },
-    ];
-  }
-
-  return [
-    { label: "Details", status: "done" },
-    { label: "Estimate", status: "current" },
-    { label: "Send", status: "upcoming" },
-  ];
-}
-
 function FieldLabel(props: { label: string; required?: boolean; optional?: boolean }) {
   return (
     <span className="inline-flex items-center gap-1.5 text-sm font-medium text-foreground">
@@ -914,73 +668,23 @@ function FieldLabel(props: { label: string; required?: boolean; optional?: boole
   );
 }
 
-function WorkflowHeader(props: {
-  headline: string;
-  currentLabel: string;
-  steps: WorkflowStep[];
+function StatusPill(props: {
+  children: string;
+  tone: "neutral" | "success" | "danger";
 }) {
-  return (
-    <div className="rounded-[24px] border border-border/80 bg-white/72 px-4 py-4 sm:px-5">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <p className="text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground">
-          {props.headline}
-        </p>
-        <p className="text-sm text-foreground">{props.currentLabel}</p>
-      </div>
-      <ol className="mt-4 flex flex-wrap items-center gap-3">
-        {props.steps.map((step, index) => (
-          <li key={step.label} className="flex items-center gap-3">
-            <div className="flex items-center gap-2">
-              <span
-                className={cn(
-                  "inline-flex size-7 shrink-0 items-center justify-center rounded-full border text-xs font-semibold transition",
-                  step.status === "done"
-                    ? "border-foreground bg-foreground text-white"
-                    : step.status === "current"
-                      ? "border-accent/35 bg-accent-soft text-foreground"
-                      : "border-border bg-background text-muted-foreground",
-                )}
-              >
-                {index + 1}
-              </span>
-              <span
-                className={cn(
-                  "text-sm",
-                  step.status === "upcoming"
-                    ? "text-muted-foreground"
-                    : "font-medium text-foreground",
-                )}
-              >
-                {step.label}
-              </span>
-            </div>
-            {index < props.steps.length - 1 ? (
-              <span className="hidden h-px w-6 bg-border sm:block" />
-            ) : null}
-          </li>
-        ))}
-      </ol>
-    </div>
-  );
-}
+  const className =
+    props.tone === "success"
+      ? "border-emerald-200 bg-success-soft text-foreground"
+      : props.tone === "danger"
+        ? "border-rose-200 bg-danger-soft text-foreground"
+        : "border-border bg-background text-foreground";
 
-function SummaryTile(props: {
-  icon: ReactNode;
-  label: string;
-  value: string;
-}) {
   return (
-    <div className="rounded-[22px] border border-border/70 bg-background px-4 py-4">
-      <div className="flex items-start gap-3">
-        {props.icon}
-        <div className="min-w-0">
-          <p className="text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground">
-            {props.label}
-          </p>
-          <p className="mt-1 text-sm text-foreground">{props.value}</p>
-        </div>
-      </div>
-    </div>
+    <span
+      className={`inline-flex h-8 items-center rounded-full border px-3 text-xs font-semibold uppercase tracking-[0.14em] ${className}`}
+    >
+      {props.children}
+    </span>
   );
 }
 
@@ -996,7 +700,7 @@ function ErrorPanel(props: { message: string }) {
 function TimelineRow(props: { title: string; description: string }) {
   return (
     <div className="flex items-start gap-3">
-      <CheckCircle2 className="mt-0.5 size-4 shrink-0 text-foreground" />
+      <AlertCircle className="mt-0.5 size-4 shrink-0 text-foreground" />
       <div>
         <p className="font-medium text-foreground">{props.title}</p>
         <p className="mt-1 text-muted-foreground">{props.description}</p>

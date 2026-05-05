@@ -29,6 +29,7 @@ type FilamentRow = {
 type TaskRow = {
   id: number;
   nameOrLink: string;
+  sourceUrl: string | null;
   filamentId: number;
   quantity: number;
   weightGrams: number | null;
@@ -95,6 +96,7 @@ const taskSelectQuery = `
   SELECT
     tasks.id,
     tasks.name_or_link AS nameOrLink,
+    tasks.source_url AS sourceUrl,
     tasks.filament_id AS filamentId,
     tasks.quantity,
     tasks.weight_grams AS weightGrams,
@@ -201,23 +203,15 @@ export function createUploadedArtifact(input: {
 
 export function createTask(
   input:
-    | {
-        mode: "manual";
-        nameOrLink: string;
-        filamentId: number;
-        quantity: number;
-        weightGrams: number;
-        durationMinutes: number;
-        note: string;
-      }
-    | {
-        mode: "upload";
-        nameOrLink: string;
-        filamentId: number;
-        quantity: number;
-        sourceArtifactId: number;
-        note: string;
-      },
+    {
+      mode: "upload";
+      name?: string;
+      sourceUrl?: string;
+      filamentId: number;
+      quantity: number;
+      sourceArtifactIds: number[];
+      note: string;
+    },
 ) {
   const db = getDb();
   const filament = getFilamentById(db, input.filamentId);
@@ -225,67 +219,38 @@ export function createTask(
   if (!filament) {
     throw new Error("Filament not found.");
   }
+  const sourceArtifacts = input.sourceArtifactIds.map((artifactId) => {
+    const artifact = getArtifactById(artifactId);
+    if (!artifact || artifact.kind !== "source-model") {
+      throw new Error("Uploaded model file not found.");
+    }
 
-  if (input.mode === "manual") {
-    const now = new Date().toISOString();
-    const settings = getSettings();
-    const pricing = calculatePricing({
-      weightGrams: input.weightGrams,
-      durationMinutes: input.durationMinutes,
-      quantity: input.quantity,
-      pricePerKg: filament.pricePerKg,
-      machineHourPrice: settings.machineHourPrice,
-    });
+    if (artifact.taskId !== null) {
+      throw new Error("Uploaded model file has already been assigned.");
+    }
 
-    const result = db
-      .prepare(
-        `
-          INSERT INTO tasks (
-            name_or_link,
-            filament_id,
-            quantity,
-            weight_grams,
-            duration_minutes,
-            estimated_price,
-            final_price,
-            status,
-            submission_state,
-            submitted_at,
-            estimate_state,
-            estimate_source,
-            estimate_error,
-            note
-          )
-          VALUES (?, ?, ?, ?, ?, ?, NULL, 'new', 'submitted', ?, 'ready', 'manual', NULL, ?)
-        `,
-      )
-      .run(
-        input.nameOrLink,
-        input.filamentId,
-        input.quantity,
-        input.weightGrams,
-        input.durationMinutes,
-        pricing.estimatedPrice,
-        now,
-        input.note,
-      );
+    return artifact;
+  });
 
-    return {
-      task: getTaskById(Number(result.lastInsertRowid)),
-      queuePayload: null,
-    };
+  const uniqueArtifactIds = new Set(sourceArtifacts.map((artifact) => artifact.id));
+  if (uniqueArtifactIds.size !== sourceArtifacts.length) {
+    throw new Error("Each uploaded model file must be unique.");
   }
 
-  const sourceArtifact = getArtifactById(input.sourceArtifactId);
-  if (!sourceArtifact || sourceArtifact.kind !== "source-model") {
-    throw new Error("Uploaded model file not found.");
-  }
-
-  if (sourceArtifact.taskId !== null) {
-    throw new Error("Uploaded model file has already been assigned.");
+  const has3mf = sourceArtifacts.some((artifact) =>
+    artifact.originalName.toLowerCase().endsWith(".3mf"),
+  );
+  if (has3mf && sourceArtifacts.length > 1) {
+    throw new Error("3MF uploads must be estimated one file at a time.");
   }
 
   const presetKey = filament.presetKey;
+  const primaryArtifact = sourceArtifacts[0];
+  const displayName = inferTaskDisplayName({
+    name: input.name,
+    sourceUrl: input.sourceUrl,
+    sourceArtifacts,
+  });
 
   const transaction = db.transaction(() => {
     const taskResult = db
@@ -293,6 +258,7 @@ export function createTask(
         `
           INSERT INTO tasks (
             name_or_link,
+            source_url,
             filament_id,
             quantity,
             weight_grams,
@@ -307,17 +273,17 @@ export function createTask(
             estimate_error,
             note
           )
-          VALUES (?, ?, ?, NULL, NULL, NULL, NULL, 'new', 'draft', NULL, 'pending', 'prusa', NULL, ?)
+          VALUES (?, ?, ?, ?, NULL, NULL, NULL, NULL, 'new', 'draft', NULL, 'pending', 'prusa', NULL, ?)
         `,
       )
-      .run(input.nameOrLink, input.filamentId, input.quantity, input.note);
+      .run(displayName, input.sourceUrl ?? null, input.filamentId, input.quantity, input.note);
 
     const taskId = Number(taskResult.lastInsertRowid);
 
-    db.prepare("UPDATE artifacts SET task_id = ? WHERE id = ?").run(
-      taskId,
-      input.sourceArtifactId,
-    );
+    const assignArtifact = db.prepare("UPDATE artifacts SET task_id = ? WHERE id = ?");
+    for (const artifact of sourceArtifacts) {
+      assignArtifact.run(taskId, artifact.id);
+    }
 
     const sliceJobResult = db
       .prepare(
@@ -334,7 +300,7 @@ export function createTask(
           VALUES (?, ?, 'queued', 'prusa', ?, 1, NULL)
         `,
       )
-      .run(taskId, input.sourceArtifactId, presetKey);
+      .run(taskId, primaryArtifact.id, presetKey);
 
     return {
       taskId,
@@ -347,13 +313,13 @@ export function createTask(
     queuePayload: {
       sliceJobId: transaction.sliceJobId,
       taskId: transaction.taskId,
-      sourceArtifact: {
-        id: sourceArtifact.id,
-        storageKey: sourceArtifact.storageKey,
-        originalName: sourceArtifact.originalName,
-        contentType: sourceArtifact.contentType,
-        sizeBytes: sourceArtifact.sizeBytes,
-      },
+      sourceArtifacts: sourceArtifacts.map((artifact) => ({
+        id: artifact.id,
+        storageKey: artifact.storageKey,
+        originalName: artifact.originalName,
+        contentType: artifact.contentType,
+        sizeBytes: artifact.sizeBytes,
+      })),
       filamentMaterial: filament.material,
       presetKey,
     } satisfies SliceQueuePayload,
@@ -439,6 +405,7 @@ export function updateTask(
   id: number,
   patch: {
     nameOrLink?: string;
+    sourceUrl?: string | null;
     filamentId?: number;
     quantity?: number;
     weightGrams?: number | null;
@@ -457,6 +424,7 @@ export function updateTask(
 
   const next = {
     nameOrLink: patch.nameOrLink ?? current.nameOrLink,
+    sourceUrl: patch.sourceUrl !== undefined ? patch.sourceUrl : current.sourceUrl,
     filamentId: patch.filamentId ?? current.filamentId,
     quantity: patch.quantity ?? current.quantity,
     weightGrams:
@@ -514,6 +482,7 @@ export function updateTask(
     `
       UPDATE tasks
       SET name_or_link = @nameOrLink,
+          source_url = @sourceUrl,
           filament_id = @filamentId,
           quantity = @quantity,
           weight_grams = @weightGrams,
@@ -630,6 +599,31 @@ export function getArtifactById(id: number) {
     .get(id) as ArtifactRow | undefined;
 
   return row ? mapArtifact(row) : null;
+}
+
+export function getArtifactsForTask(taskId: number, kind?: Artifact["kind"]) {
+  const db = getDb();
+  const rows = db
+    .prepare(
+      `
+        SELECT
+          id,
+          task_id AS taskId,
+          kind,
+          storage_key AS storageKey,
+          original_name AS originalName,
+          content_type AS contentType,
+          size_bytes AS sizeBytes,
+          created_at AS createdAt
+        FROM artifacts
+        WHERE task_id = ?
+          ${kind ? "AND kind = ?" : ""}
+        ORDER BY id ASC
+      `,
+    )
+    .all(...(kind ? [taskId, kind] : [taskId])) as ArtifactRow[];
+
+  return rows.map(mapArtifact);
 }
 
 export function getSliceJobById(id: number) {
@@ -831,8 +825,8 @@ export function retrySliceJob(id: number) {
     throw new Error("Task not found.");
   }
 
-  const artifact = getArtifactById(job.sourceArtifactId);
-  if (!artifact) {
+  const sourceArtifacts = getArtifactsForTask(task.id, "source-model");
+  if (sourceArtifacts.length === 0) {
     throw new Error("Source artifact not found.");
   }
 
@@ -873,13 +867,13 @@ export function retrySliceJob(id: number) {
     queuePayload: {
       sliceJobId: id,
       taskId: task.id,
-      sourceArtifact: {
+      sourceArtifacts: sourceArtifacts.map((artifact) => ({
         id: artifact.id,
         storageKey: artifact.storageKey,
         originalName: artifact.originalName,
         contentType: artifact.contentType,
         sizeBytes: artifact.sizeBytes,
-      },
+      })),
       filamentMaterial: filament.material,
       presetKey: job.presetKey,
     } satisfies SliceQueuePayload,
@@ -972,6 +966,7 @@ function mapTask(row: TaskRow): Task {
   return {
     id: row.id,
     nameOrLink: row.nameOrLink,
+    sourceUrl: row.sourceUrl,
     filamentId: row.filamentId,
     quantity: row.quantity,
     weightGrams: row.weightGrams,
@@ -1026,4 +1021,39 @@ function mapSliceJob(row: SliceJobRow): SliceJob {
     startedAt: row.startedAt,
     finishedAt: row.finishedAt,
   };
+}
+
+function inferTaskDisplayName(input: {
+  name?: string;
+  sourceUrl?: string;
+  sourceArtifacts: Artifact[];
+}) {
+  const trimmedName = input.name?.trim();
+  if (trimmedName) {
+    return trimmedName;
+  }
+
+  if (input.sourceArtifacts.length === 1) {
+    return stripFileExtension(input.sourceArtifacts[0]!.originalName);
+  }
+
+  if (input.sourceArtifacts.length > 1) {
+    return `${input.sourceArtifacts.length} STL files`;
+  }
+
+  if (input.sourceUrl) {
+    try {
+      const parsed = new URL(input.sourceUrl);
+      const lastSegment = parsed.pathname.split("/").filter(Boolean).at(-1);
+      return lastSegment ? decodeURIComponent(lastSegment) : parsed.hostname;
+    } catch {
+      return input.sourceUrl;
+    }
+  }
+
+  return "Untitled request";
+}
+
+function stripFileExtension(fileName: string) {
+  return fileName.replace(/\.[^.]+$/, "");
 }

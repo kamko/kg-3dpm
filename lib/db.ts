@@ -84,6 +84,7 @@ function migrateTasksTable(db: Database.Database) {
     (column) => column.name === "submission_state",
   );
   const hasAcceptedAt = columns.some((column) => column.name === "accepted_at");
+  const hasSourceUrl = columns.some((column) => column.name === "source_url");
   const filamentRefs = db
     .prepare("PRAGMA foreign_key_list(tasks)")
     .all() as Array<{ table: string }>;
@@ -95,6 +96,7 @@ function migrateTasksTable(db: Database.Database) {
     hasEstimateState &&
     hasSubmissionState &&
     hasAcceptedAt &&
+    hasSourceUrl &&
     !hasLegacyFilamentRef
   ) {
     return;
@@ -106,6 +108,7 @@ function migrateTasksTable(db: Database.Database) {
     CREATE TABLE tasks (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       name_or_link TEXT NOT NULL,
+      source_url TEXT,
       filament_id INTEGER NOT NULL REFERENCES filaments(id),
       quantity INTEGER NOT NULL CHECK (quantity > 0),
       weight_grams REAL CHECK (weight_grams IS NULL OR weight_grams > 0),
@@ -134,6 +137,7 @@ function migrateTasksTable(db: Database.Database) {
     INSERT INTO tasks (
       id,
       name_or_link,
+      source_url,
       filament_id,
       quantity,
       weight_grams,
@@ -153,6 +157,7 @@ function migrateTasksTable(db: Database.Database) {
     SELECT
       id,
       name_or_link,
+      ${hasSourceUrl ? "source_url" : "NULL"},
       filament_id,
       quantity,
       weight_grams,

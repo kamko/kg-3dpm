@@ -43,18 +43,24 @@ async function report(
 
 async function processJob(job: SliceQueuePayload) {
   const workDir = await mkdtemp(path.join(os.tmpdir(), "kg-3dpm-slice-"));
-  const sourcePath = path.join(workDir, job.sourceArtifact.originalName);
 
   try {
     await report(job.sliceJobId, { status: "running" });
-    await downloadObjectToFile({
-      key: job.sourceArtifact.storageKey,
-      targetPath: sourcePath,
-    });
+    const sourceFiles: Array<{ path: string; originalName: string }> = [];
+    for (const artifact of job.sourceArtifacts) {
+      const sourcePath = path.join(workDir, artifact.originalName);
+      await downloadObjectToFile({
+        key: artifact.storageKey,
+        targetPath: sourcePath,
+      });
+      sourceFiles.push({
+        path: sourcePath,
+        originalName: artifact.originalName,
+      });
+    }
 
     const result = await engine.slice({
-      sourcePath,
-      originalName: job.sourceArtifact.originalName,
+      sourceFiles,
       presetKey: job.presetKey,
       workDir,
     });
@@ -82,7 +88,7 @@ async function processJob(job: SliceQueuePayload) {
       const logPath = path.join(workDir, "prusa.log");
       await writeFile(logPath, result.logText, "utf8");
       const logStorageKey = buildLogStorageKey(
-        `${path.basename(job.sourceArtifact.originalName)}.log`,
+        `${path.basename(job.sourceArtifacts[0]?.originalName ?? "slice")}.log`,
       );
       await putFileObject({
         key: logStorageKey,

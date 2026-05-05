@@ -1,6 +1,38 @@
 # kg-3dpm
 
-`kg-3dpm` is an MVP 3D printing self-checkout app with a public request flow and a separate backoffice. The public side can now submit real slicer-backed estimates asynchronously: uploaded STL/3MF files are stored in RustFS, queued in Redis, sliced by a sandboxed worker, and written back into the app when PrusaSlicer finishes.
+`kg-3dpm` is a lightweight 3D print request and estimation tool with two surfaces:
+
+- a public upload flow for end users
+- a backoffice for operators who price, review, accept, and manage jobs
+
+Instead of asking users to guess weight or print time, the app can take STL/3MF uploads, run a real slicer estimate in a sandboxed worker, and return filament usage, duration, and price before the request is sent.
+
+## What this tool does
+
+### Public side
+
+- upload one `3MF`, or one or more `STL` files
+- choose filament and quantity
+- run a real slicer-backed estimate
+- review filament usage, machine time, and price
+- send the request only after the estimate looks right
+
+### Backoffice
+
+- manage filament pricing and slicer preset mapping
+- adjust machine hour pricing
+- review incoming estimates and request notes
+- accept requests so pricing is locked for that row
+- download uploaded source models
+- retry failed slicer jobs
+
+### Under the hood
+
+- source files are stored in RustFS
+- slice jobs are queued in Redis
+- a separate worker slices models with PrusaSlicer
+- results are written back to SQLite through the app API
+- the worker runs in a locked-down container with no public ingress
 
 ## Stack
 
@@ -15,8 +47,8 @@
 ## What changed in this version
 
 - Public `/` flow supports:
-  - `Model file` mode for STL/3MF uploads
-  - `Slicer values` mode for exact manual numbers
+  - STL/3MF uploads with real slicer-backed estimation
+  - multi-file STL estimation in one request
   - pending estimate confirmation with polling until the slicer result is ready
 - Admin `/admin` shows:
   - estimate state (`queued`, `slicing`, `ready`, `needs review`)
@@ -31,8 +63,8 @@
   - `web`
   - `worker`
   - `redis`
-- `rustfs`
-- `rustfs-perms`
+  - `rustfs`
+  - `rustfs-perms`
 
 ## Pricing
 
@@ -56,7 +88,7 @@ Open:
 - [Public page](http://localhost:3000/)
 - [Admin page](http://localhost:3000/admin)
 
-Manual slicer values work immediately in local dev. File uploads need Redis + RustFS + worker running, so the easiest full setup is Docker Compose.
+File uploads need Redis + RustFS + worker running, so the easiest full setup is Docker Compose.
 
 ## Docker Compose deployment
 
@@ -73,6 +105,22 @@ Services:
 - `rustfs` console on [http://localhost:9001](http://localhost:9001)
 - `redis` internal only
 - `worker` internal only
+
+You can also build the runtime images directly without Compose:
+
+```bash
+docker build -t kg-3dpm-web -f Dockerfile .
+docker build -t kg-3dpm-worker -f worker/Dockerfile .
+```
+
+## Container publishing
+
+GitHub Actions now builds and publishes both runtime images to GitHub Container Registry on every push to `main`:
+
+- `ghcr.io/<owner>/kg-3dpm-web`
+- `ghcr.io/<owner>/kg-3dpm-worker`
+
+The workflow file is [`.github/workflows/docker-publish.yml`](/C:/Users/kamko/Documents/New%20project%202/.github/workflows/docker-publish.yml). Pull requests still build both images for validation, but do not push them.
 
 Default local RustFS credentials:
 

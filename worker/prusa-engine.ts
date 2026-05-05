@@ -28,8 +28,10 @@ export type SliceEngineResult = {
 
 export interface SlicerEngine {
   slice(input: {
-    sourcePath: string;
-    originalName: string;
+    sourceFiles: Array<{
+      path: string;
+      originalName: string;
+    }>;
     presetKey: string;
     workDir: string;
   }): Promise<SliceEngineResult>;
@@ -37,19 +39,30 @@ export interface SlicerEngine {
 
 export class PrusaSlicerEngine implements SlicerEngine {
   async slice(input: {
-    sourcePath: string;
-    originalName: string;
+    sourceFiles: Array<{
+      path: string;
+      originalName: string;
+    }>;
     presetKey: string;
     workDir: string;
   }) {
+    if (input.sourceFiles.length === 0) {
+      throw new Error("No source files were provided to the slicer.");
+    }
+
     const outputPath = path.join(input.workDir, "result.gcode");
-    const fileExtension = path.extname(input.originalName).toLowerCase();
+    const primarySource = input.sourceFiles[0];
+    const fileExtension = path.extname(primarySource.originalName).toLowerCase();
     const binary = process.env.PRUSA_SLICER_BIN ?? "prusa-slicer";
     let stdout = "";
     let stderr = "";
 
     if (fileExtension === ".3mf") {
-      const sourceBuffer = await fs.readFile(input.sourcePath);
+      if (input.sourceFiles.length > 1) {
+        throw new Error("3MF files must be sliced one at a time.");
+      }
+
+      const sourceBuffer = await fs.readFile(primarySource.path);
       const embeddedMetadata = await extractBambu3mfSliceMetadata(
         sourceBuffer.buffer.slice(
           sourceBuffer.byteOffset,
@@ -69,7 +82,7 @@ export class PrusaSlicerEngine implements SlicerEngine {
       try {
         const result = await execFileAsync(
           binary,
-          ["--export-gcode", "--output", outputPath, input.sourcePath],
+          ["--export-gcode", "--output", outputPath, primarySource.path],
           {
             timeout: getSliceJobTimeoutMs(),
             cwd: input.workDir,
@@ -79,7 +92,7 @@ export class PrusaSlicerEngine implements SlicerEngine {
         stdout = result.stdout;
         stderr = result.stderr;
       } catch (error) {
-        const fallbackPath = await convert3mfToStl(input.sourcePath, input.workDir);
+        const fallbackPath = await convert3mfToStl(primarySource.path, input.workDir);
         const result = await execFileAsync(
           binary,
           [
@@ -114,7 +127,7 @@ export class PrusaSlicerEngine implements SlicerEngine {
           "--export-gcode",
           "--output",
           outputPath,
-          input.sourcePath,
+          ...input.sourceFiles.map((sourceFile) => sourceFile.path),
         ],
         {
           timeout: getSliceJobTimeoutMs(),
@@ -136,7 +149,7 @@ export class PrusaSlicerEngine implements SlicerEngine {
       generatedFiles: [
         {
           path: outputPath,
-          fileName: `${path.basename(input.originalName, fileExtension)}.gcode`,
+          fileName: `${path.basename(primarySource.originalName, fileExtension)}.gcode`,
           contentType: "text/plain",
         },
       ],

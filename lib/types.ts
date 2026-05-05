@@ -71,6 +71,7 @@ export type SliceJob = {
 export type Task = {
   id: number;
   nameOrLink: string;
+  sourceUrl: string | null;
   filamentId: number;
   quantity: number;
   weightGrams: number | null;
@@ -102,30 +103,21 @@ export type PricingInput = {
 };
 
 export type CreateTaskPayload =
-  | {
-      mode: "manual";
-      nameOrLink: string;
-      filamentId: number;
-      quantity: number;
-      weightGrams: number;
-      durationInput: string;
-      note?: string;
-    }
-  | {
-      mode: "upload";
-      nameOrLink: string;
-      filamentId: number;
-      quantity: number;
-      sourceArtifactId: number;
-      note?: string;
-    };
+  {
+    mode: "upload";
+    name?: string;
+    sourceUrl?: string;
+    filamentId: number;
+    quantity: number;
+    sourceArtifactIds: number[];
+    note?: string;
+  };
 
 export type SliceQueuePayload = {
   sliceJobId: number;
   taskId: number;
-  sourceArtifact: Pick<
-    Artifact,
-    "id" | "storageKey" | "originalName" | "contentType" | "sizeBytes"
+  sourceArtifacts: Array<
+    Pick<Artifact, "id" | "storageKey" | "originalName" | "contentType" | "sizeBytes">
   >;
   filamentMaterial: string;
   presetKey: string;

@@ -1,6 +1,5 @@
 import { NextResponse } from "next/server";
 import { enqueueSliceJob } from "@/lib/queue";
-import { parseDurationInput } from "@/lib/pricing";
 import { createTask, reportSliceJobFailed } from "@/lib/store";
 import { createTaskSchema } from "@/lib/validators";
 
@@ -10,35 +9,13 @@ export async function POST(request: Request) {
   try {
     const payload = createTaskSchema.parse(await request.json());
 
-    if (payload.mode === "manual") {
-      const durationMinutes = parseDurationInput(payload.durationInput);
-
-      if (!durationMinutes) {
-        return NextResponse.json(
-          { error: "Duration must be valid minutes or HH:MM." },
-          { status: 400 },
-        );
-      }
-
       const result = createTask({
-        mode: "manual",
-        nameOrLink: payload.nameOrLink,
+        mode: "upload",
+        name: payload.name,
+        sourceUrl: payload.sourceUrl,
         filamentId: payload.filamentId,
         quantity: payload.quantity,
-        weightGrams: payload.weightGrams,
-        durationMinutes,
-        note: payload.note,
-      });
-
-      return NextResponse.json({ task: result.task });
-    }
-
-    const result = createTask({
-      mode: "upload",
-      nameOrLink: payload.nameOrLink,
-      filamentId: payload.filamentId,
-      quantity: payload.quantity,
-      sourceArtifactId: payload.sourceArtifactId,
+        sourceArtifactIds: payload.sourceArtifactIds,
       note: payload.note,
     });
 

@@ -11,7 +11,6 @@ import {
   Settings2,
 } from "lucide-react";
 import { useState, useTransition } from "react";
-import { StatusBadge } from "@/components/status-badge";
 import { calculatePricing, parseDurationInput } from "@/lib/pricing";
 import { PRUSA_PRESET_OPTIONS } from "@/lib/prusa";
 import {
@@ -41,6 +40,7 @@ type SortMode = "newest" | "name" | "estimate" | "status";
 
 type TaskDraft = {
   nameOrLink: string;
+  sourceUrl: string;
   filamentId: string;
   quantity: string;
   weightGrams: string;
@@ -286,7 +286,7 @@ export function AdminDashboard({
       draft.finalPrice.trim() === "" ? null : Number(draft.finalPrice);
 
     if (!draft.nameOrLink.trim()) {
-      throw new Error("Task name or link is required.");
+      throw new Error("Task name is required.");
     }
 
     if (!Number.isFinite(quantity) || quantity <= 0) {
@@ -340,6 +340,7 @@ export function AdminDashboard({
     try {
       const data = await patchJson<{ task: Task }>(`/api/tasks/${id}`, {
         nameOrLink: optimisticTask.nameOrLink,
+        sourceUrl: optimisticTask.sourceUrl,
         filamentId: optimisticTask.filamentId,
         quantity: optimisticTask.quantity,
         weightGrams,
@@ -500,12 +501,12 @@ export function AdminDashboard({
 
       <section className="surface overflow-hidden">
         <div className="flex flex-col gap-4 border-b border-border px-5 py-4 sm:flex-row sm:items-end sm:justify-between sm:px-6">
-          <div>
-            <p className="eyebrow">Tasks</p>
-            <h2 className="mt-1 text-xl font-semibold tracking-[-0.02em] text-foreground">
-              Requests, slicer state, and quick edits
-            </h2>
-          </div>
+            <div>
+              <p className="eyebrow">Tasks</p>
+              <h2 className="mt-1 text-xl font-semibold tracking-[-0.02em] text-foreground">
+                Requests and production queue
+              </h2>
+            </div>
 
           <div className="flex flex-col gap-3 sm:flex-row">
             <label className="flex h-11 items-center gap-2 rounded-full border border-border bg-white px-4 text-sm text-muted-foreground">
@@ -564,7 +565,7 @@ export function AdminDashboard({
           <table className="data-table min-w-[1480px]">
             <thead>
               <tr>
-                <th>Name / link</th>
+                <th>Request</th>
                 <th>Filament</th>
                 <th>Qty</th>
                 <th>Weight</th>
@@ -630,8 +631,7 @@ function MachinePricePanel({
           Machine hour price
         </h2>
         <p className="text-sm leading-6 text-muted-foreground">
-          One value controls machine cost across ready estimates. Changing it refreshes
-          manual and slicer-backed pricing immediately.
+          One value controls machine cost across ready estimates.
         </p>
       </div>
 
@@ -1046,6 +1046,19 @@ function TaskRow({
               }))
             }
           />
+          <input
+            className="table-input"
+            inputMode="url"
+            placeholder="Reference link"
+            value={draft.sourceUrl}
+            onBlur={() => commit()}
+            onChange={(event) =>
+              setDraft((current) => ({
+                ...current,
+                sourceUrl: event.target.value,
+              }))
+            }
+          />
           <p className="text-xs text-muted-foreground">
             Created {formatDateTime(task.createdAt)}
           </p>
@@ -1163,26 +1176,23 @@ function TaskRow({
         />
       </td>
       <td className="min-w-[180px]">
-        <div className="space-y-2">
-          <select
-            className="table-select"
-            value={draft.status}
-            onBlur={() => commit()}
-            onChange={(event) =>
-              setDraft((current) => ({
-                ...current,
-                status: event.target.value as TaskStatus,
-              }))
-            }
-          >
-            {TASK_STATUSES.map((status) => (
-              <option key={status} value={status}>
-                {status}
-              </option>
-            ))}
-          </select>
-          <StatusBadge status={draft.status} />
-        </div>
+        <select
+          className={cn("table-select rounded-full border px-3", statusSelectClass(draft.status))}
+          value={draft.status}
+          onBlur={() => commit()}
+          onChange={(event) =>
+            setDraft((current) => ({
+              ...current,
+              status: event.target.value as TaskStatus,
+            }))
+          }
+        >
+          {TASK_STATUSES.map((status) => (
+            <option key={status} value={status}>
+              {status}
+            </option>
+          ))}
+        </select>
       </td>
       <td className="min-w-[220px]">
         <div className="space-y-2">
@@ -1254,6 +1264,7 @@ function TaskRow({
 function taskToDraft(task: Task): TaskDraft {
   return {
     nameOrLink: task.nameOrLink,
+    sourceUrl: task.sourceUrl ?? "",
     filamentId: String(task.filamentId),
     quantity: String(task.quantity),
     weightGrams: task.weightGrams === null ? "" : String(task.weightGrams),
@@ -1280,6 +1291,22 @@ function taskRowClass(status: TaskStatus) {
   return "bg-white/56";
 }
 
+function statusSelectClass(status: TaskStatus) {
+  if (status === "done") {
+    return "border-emerald-200 bg-success-soft text-foreground";
+  }
+
+  if (status === "printing") {
+    return "border-amber-300 bg-warning-soft text-foreground";
+  }
+
+  if (status === "failed" || status === "cancelled") {
+    return "border-rose-200 bg-danger-soft text-foreground";
+  }
+
+  return "border-border bg-white text-foreground";
+}
+
 function buildOptimisticTask(params: {
   currentTask?: Task;
   draft: TaskDraft;
@@ -1295,6 +1322,7 @@ function buildOptimisticTask(params: {
   return {
     id: currentTask?.id ?? 0,
     nameOrLink: params.draft.nameOrLink.trim(),
+    sourceUrl: params.draft.sourceUrl.trim() || null,
     filamentId: params.filament.id,
     quantity: Number(params.draft.quantity),
     weightGrams: params.weightGrams,
