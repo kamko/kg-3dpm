@@ -39,7 +39,7 @@ export function UserRequestForm({
   const [activeAction, setActiveAction] = useState<"estimate" | "send" | null>(
     null,
   );
-  const [isRefreshingEstimate, setIsRefreshingEstimate] = useState(false);
+  const [, setIsRefreshingEstimate] = useState(false);
 
   const selectedFilament =
     filaments.find((filament) => filament.id === Number(form.filamentId)) ??
@@ -76,6 +76,9 @@ export function UserRequestForm({
     confirmation && isDraft && confirmation.estimateState === "failed",
   );
   const isSendingRequest = activeAction === "send";
+  const canResetWorkflow = Boolean(
+    confirmation && (isEstimateReadyToSend || isEstimateFailed || isSubmitted),
+  );
 
   const canCreateEstimate =
     !confirmation &&
@@ -478,92 +481,36 @@ export function UserRequestForm({
             />
           </label>
 
-          <div className="mt-4 flex flex-col gap-3 border-t border-border/70 pt-4 sm:flex-row sm:items-center sm:justify-between">
+          <div className="mt-4 flex flex-col gap-3 border-t border-border/70 pt-4">
             <p className="text-xs text-muted-foreground">
               {confirmation
-                ? "Filament, quantity, and files are locked after estimation starts."
+                ? isSubmitted
+                  ? "This request is already sent. Start over to estimate a new file."
+                  : isEstimateReadyToSend
+                    ? "Your estimate is ready. Review the price in the sidebar, then send the request."
+                    : isEstimateFailed
+                      ? "The estimate needs manual review before it can be sent."
+                  : "Filament, quantity, and files are locked after estimation starts."
                 : "Review the estimate before anything is sent."}
             </p>
 
             {!confirmation ? (
               <button
-                className="inline-flex h-12 items-center justify-center rounded-full bg-foreground px-6 text-sm font-medium text-white transition hover:bg-foreground/90 disabled:cursor-not-allowed disabled:bg-foreground/30"
+                className="inline-flex h-12 min-w-40 self-end items-center justify-center rounded-full bg-foreground px-7 text-sm font-medium text-white transition hover:bg-foreground/90 disabled:cursor-not-allowed disabled:bg-foreground/30"
                 disabled={!canCreateEstimate || Boolean(activeAction)}
                 type="submit"
               >
                 {activeAction === "estimate" ? "Estimating..." : "Estimate cost"}
               </button>
-            ) : null}
-          </div>
-
-          <div className="mt-4 rounded-[20px] border border-border/70 bg-background/82 px-4 py-4">
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-              <div className="space-y-2">
-                <div className="flex flex-wrap items-center gap-3">
-                  <StatusPill
-                    tone={
-                      isSubmitted
-                        ? "success"
-                        : isEstimateReadyToSend
-                          ? "success"
-                          : isEstimateFailed
-                            ? "danger"
-                            : confirmation
-                              ? "neutral"
-                              : "neutral"
-                    }
-                  >
-                    {isSubmitted
-                      ? "Request sent"
-                      : isEstimateReadyToSend
-                        ? "Estimate ready"
-                        : isEstimateFailed
-                          ? "Needs review"
-                          : confirmation
-                            ? "Estimating"
-                            : "Estimate status"}
-                  </StatusPill>
-                  <p className="text-sm text-muted-foreground">
-                    {isSubmitted
-                      ? "The request is in the print shop queue."
-                      : isEstimateReadyToSend
-                        ? "Looks good, you can send the request now."
-                        : isEstimateFailed
-                          ? "The estimate needs manual review."
-                          : confirmation
-                            ? isRefreshingEstimate
-                              ? "Refreshing the slicer result..."
-                              : "The slicer is running now."
-                            : "Your estimate will appear here after you click Estimate cost."}
-                  </p>
-                </div>
-
-                <div className="grid gap-2 text-sm text-muted-foreground sm:grid-cols-3">
-                  <span>File: {fileLabel}</span>
-                  <span>
-                    Filament:{" "}
-                    {confirmedFilament
-                      ? publicFilamentLabel(confirmedFilament)
-                      : selectedFilament
-                        ? publicFilamentLabel(selectedFilament)
-                        : "Not selected"}
-                  </span>
-                  <span>
-                    Quantity: {confirmation ? confirmation.quantity : quantity || 1}
-                  </span>
-                </div>
-              </div>
-
-              {confirmation ? (
+            ) : canResetWorkflow ? (
                 <button
-                  className="inline-flex h-9 shrink-0 items-center justify-center rounded-full border border-border bg-white px-4 text-sm font-medium text-foreground transition hover:border-accent/30 hover:bg-accent/5"
+                  className="inline-flex h-11 min-w-40 self-end items-center justify-center rounded-full border border-border bg-white px-6 text-sm font-medium text-foreground transition hover:border-accent/30 hover:bg-accent/5"
                   type="button"
                   onClick={resetWorkflow}
                 >
                   {isSubmitted ? "Create another" : "Start over"}
                 </button>
-              ) : null}
-            </div>
+            ) : null}
           </div>
         </div>
 
@@ -664,26 +611,6 @@ function FieldLabel(props: { label: string; required?: boolean; optional?: boole
       {props.optional ? (
         <span className="text-xs font-medium text-muted-foreground">optional</span>
       ) : null}
-    </span>
-  );
-}
-
-function StatusPill(props: {
-  children: string;
-  tone: "neutral" | "success" | "danger";
-}) {
-  const className =
-    props.tone === "success"
-      ? "border-emerald-200 bg-success-soft text-foreground"
-      : props.tone === "danger"
-        ? "border-rose-200 bg-danger-soft text-foreground"
-        : "border-border bg-background text-foreground";
-
-  return (
-    <span
-      className={`inline-flex h-8 items-center rounded-full border px-3 text-xs font-semibold uppercase tracking-[0.14em] ${className}`}
-    >
-      {props.children}
     </span>
   );
 }
