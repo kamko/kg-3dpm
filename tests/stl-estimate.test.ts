@@ -2,6 +2,7 @@ import JSZip from "jszip";
 import { describe, expect, it } from "vitest";
 import {
   buildAsciiStl,
+  extractBambu3mfProjectInfo,
   extractBambu3mfSliceMetadata,
   extractTrianglesFrom3mfBuffer,
   isBambuProject3mfBuffer,
@@ -260,5 +261,28 @@ describe("analyze3mfBuffer", () => {
 
     await expect(extractBambu3mfSliceMetadata(buffer)).resolves.toBeNull();
     await expect(isBambuProject3mfBuffer(buffer)).resolves.toBe(true);
+  });
+
+  it("extracts plate info from Bambu project 3MF files", async () => {
+    const zip = new JSZip();
+    zip.file(
+      "Metadata/project_settings.config",
+      `<?xml version="1.0" encoding="UTF-8"?>
+      <config>
+        <plate>
+          <metadata key="plater_name" value="Base"/>
+        </plate>
+        <plate>
+          <metadata key="plater_name" value="Inserts"/>
+        </plate>
+      </config>`,
+    );
+
+    const buffer = await zip.generateAsync({ type: "arraybuffer" });
+
+    await expect(extractBambu3mfProjectInfo(buffer)).resolves.toEqual({
+      plateCount: 2,
+      plateNames: ["Base", "Inserts"],
+    });
   });
 });

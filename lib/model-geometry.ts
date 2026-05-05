@@ -130,6 +130,29 @@ export async function isBambuProject3mfBuffer(buffer: ArrayBuffer) {
   return /X-BBL-Client-Type/i.test(xml) || /X-BBL-Client-Version/i.test(xml);
 }
 
+export async function extractBambu3mfProjectInfo(buffer: ArrayBuffer) {
+  const zip = await JSZip.loadAsync(buffer);
+  const projectSettings = zip.file("Metadata/project_settings.config");
+
+  if (!projectSettings) {
+    return null;
+  }
+
+  const xml = await projectSettings.async("string");
+  const plateBlocks = [...xml.matchAll(/<plate>([\s\S]*?)<\/plate>/g)];
+  const plateNames = plateBlocks.map((match) => {
+    return (
+      match[1].match(/\bkey="plater_name"\s+value="([^"]+)"/)?.[1]?.trim() ||
+      "Unnamed plate"
+    );
+  });
+
+  return {
+    plateCount: plateBlocks.length,
+    plateNames,
+  };
+}
+
 export function buildAsciiStl(triangles: Triangle[], solidName = "model") {
   const lines = [`solid ${solidName}`];
 

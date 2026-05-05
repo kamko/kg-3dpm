@@ -4,3 +4,11 @@ node_modules
 npm-debug.log
 db/kg-3dpm.sqlite
 .run
+coverage
+tests
+.github
+README.md
+AGENTS.md
+CLAUDE.md
+docker-compose*.yml
+tsconfig.tsbuildinfo
